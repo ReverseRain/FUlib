@@ -24,10 +24,11 @@ import time
 import random
 from utils.data_utils import read_client_data
 from utils.dlg import DLG
+from utils.attack_utils import attack,train_attack_model
 
 
 class Server(object):
-    def __init__(self, args, times):
+    def __init__(self, args):
         # Set up the main attributes
         self.args = args
         self.device = args.device
@@ -64,7 +65,6 @@ class Server(object):
         self.rs_test_auc = []
         self.rs_train_loss = []
 
-        self.times = times
         self.eval_gap = args.eval_gap
         self.client_drop_rate = args.client_drop_rate
         self.train_slow_rate = args.train_slow_rate
@@ -78,6 +78,8 @@ class Server(object):
         self.new_clients = []
         self.eval_new_clients = False
         self.fine_tuning_epoch_new = args.fine_tuning_epoch_new
+
+        # self.attack_model=None
 
     def set_clients(self, clientObj):
         for i, train_slow, send_slow in zip(range(self.num_clients), self.train_slow_clients, self.send_slow_clients):
@@ -189,7 +191,8 @@ class Server(object):
             os.makedirs(result_path)
 
         if (len(self.rs_test_acc)):
-            algo = algo + "_" + self.goal + "_" + str(self.times)
+            algo = algo + "_" + self.goal 
+            # + "_" + str(self.times)
             file_path = result_path + "{}.h5".format(algo)
             print("File path: " + file_path)
 
@@ -266,9 +269,11 @@ class Server(object):
         # self.print_(test_acc, train_acc, train_loss)
         print("Std Test Accurancy: {:.4f}".format(np.std(accs)))
         print("Std Test AUC: {:.4f}".format(np.std(aucs)))
-        if(isUnlearning):
+        # if(isUnlearning):
+        #     if(self.attack_model==None):
+        #         self.attack_model=train_attack_model()
             
-            print("Averaged KL Divergency: {:.4f}".format(KL_Divergency))
+        #     print("Averaged KL Divergency: {:.4f}".format(KL_Divergency))
 
     def print_(self, test_acc, test_auc, train_loss):
         print("Average Test Accurancy: {:.4f}".format(test_acc))

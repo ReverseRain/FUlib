@@ -101,3 +101,17 @@ def read_client_data_Shakespeare(dataset, idx, is_train=True):
         test_data = [(x, y) for x, y in zip(X_test, y_test)]
         return test_data
 
+
+def read_proxy_data(dataset):
+    proxy_data_dir = os.path.join('../dataset', dataset, 'proxy/')
+
+    train_file = proxy_data_dir  + 'proxy.npz'
+    with open(train_file, 'rb') as f:
+        proxy_data = np.load(f, allow_pickle=True)['data'].tolist()
+    proxy_data=torch.Tensor(proxy_data)
+    # X_proxy = torch.Tensor(proxy_data['x']).type(torch.int64)
+    # y_proxy = torch.Tensor(proxy_data['y']).type(torch.int64)
+
+    # proxy_data = [(x, y) for x, y in zip(X_proxy, y_proxy)]
+    
+    return proxy_data
