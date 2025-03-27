@@ -78,6 +78,8 @@ class Server(object):
         self.new_clients = []
         self.eval_new_clients = False
         self.fine_tuning_epoch_new = args.fine_tuning_epoch_new
+        
+        self.unlearning_clients=args.unlearning_clients #此处传入的仍是id list 在set clients当中变成 clients list
 
         # self.attack_model=None
 
@@ -92,6 +94,7 @@ class Server(object):
                             train_slow=train_slow, 
                             send_slow=send_slow)
             self.clients.append(client)
+        self.unlearning_clients=[self.clients[i] for i in self.unlearning_clients]
 
     # random select slow clients
     def select_slow_clients(self, slow_rate):
@@ -217,15 +220,25 @@ class Server(object):
         num_samples = []
         tot_correct = []
         tot_auc = []
+
+        att_correct=[]
+        att_num_samples=[]
         for c in self.clients:
+            if(c.unlearning==False):
+                ct, ns, auc = c.test_metrics()
+                tot_correct.append(ct*1.0)
+                tot_auc.append(auc*ns)
+                num_samples.append(ns)
+            
+        for c in self.unlearning_clients:
             ct, ns, auc = c.test_metrics()
-            tot_correct.append(ct*1.0)
-            tot_auc.append(auc*ns)
-            num_samples.append(ns)
+            att_correct.append(ct*1.0)
+            att_num_samples.append(ns)
+
 
         ids = [c.id for c in self.clients]
 
-        return ids, num_samples, tot_correct, tot_auc
+        return ids, num_samples, tot_correct, tot_auc,att_num_samples,att_correct
 
     def train_metrics(self):
         if self.eval_new_clients and self.num_new_clients > 0:
@@ -252,6 +265,8 @@ class Server(object):
         train_loss = sum(stats_train[2])*1.0 / sum(stats_train[1])
         accs = [a / n for a, n in zip(stats[2], stats[1])]
         aucs = [a / n for a, n in zip(stats[3], stats[1])]
+
+        attack_acc = sum(stats[5])*1.0 / sum(stats[4])
         
         if acc == None:
             self.rs_test_acc.append(test_acc)
@@ -269,6 +284,7 @@ class Server(object):
         # self.print_(test_acc, train_acc, train_loss)
         print("Std Test Accurancy: {:.4f}".format(np.std(accs)))
         print("Std Test AUC: {:.4f}".format(np.std(aucs)))
+        print("Average Attack Accurancy:{:.4f}".format(attack_acc))
         # if(isUnlearning):
         #     if(self.attack_model==None):
         #         self.attack_model=train_attack_model()

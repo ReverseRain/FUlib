@@ -7,7 +7,9 @@ import numpy as np
 
 from utils.result_utils import average_data
 from flcore.trainmodel.models import *
+
 from flcore.servers.serverfukd import FedFUKD
+from flcore.servers.serverbu import FedBU
 
 
 def run(arg):
@@ -40,10 +42,18 @@ def run(arg):
     print(args.model)
 
     if args.algorithm == "FedFUKD":
+        # 本方法是复现论文 https://arxiv.org/pdf/2201.09441
         args.head = copy.deepcopy(args.model.fc)
         args.model.fc = nn.Identity()
         args.model = BaseHeadSplit(args.model, args.head)
         server = FedFUKD(args)
+    elif args.algorithm == "FedBU":
+        # 本方法是复现论文 https://arxiv.org/pdf/2304.10638
+        args.head = copy.deepcopy(args.model.fc)
+        args.model.fc = nn.Identity()
+        args.model = BaseHeadSplit(args.model, args.head)
+        server = FedBU(args)
+        
 
     server.train()
 
@@ -122,8 +132,9 @@ if __name__ == "__main__":
                         help="The threthold for droping slow clients")
     
 
-    parser.add_argument("-uc","--unlearning_client", nargs='+', type=int,default=None,
-                         help='an array of integers') 
+    parser.add_argument("-uc","--unlearning_clients", nargs='+', type=int,default=None,
+                         help='an array of integers')
+    # parser.add_argument("-tc","--target_class", type=int,default=None) 
     args = parser.parse_args()
 
     os.environ["CUDA_VISIBLE_DEVICES"] = args.device_id

@@ -4,10 +4,10 @@ import torch
 import torch.nn as nn
 import numpy as np
 import os
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader,ConcatDataset
 from sklearn.preprocessing import label_binarize
 from sklearn import metrics
-from utils.data_utils import read_client_data
+from utils.data_utils import read_client_data,create_poisioned_dataset
 
 
 class Client(object):
@@ -30,6 +30,10 @@ class Client(object):
         self.batch_size = args.batch_size
         self.learning_rate = args.local_learning_rate
         self.local_epochs = args.local_epochs
+
+        self.unlearning=False
+        self.test_poision=None
+        self.train_poision=None
 
         # check BatchNorm
         self.has_BatchNorm = False
@@ -56,12 +60,21 @@ class Client(object):
         if batch_size == None:
             batch_size = self.batch_size
         train_data = read_client_data(self.dataset, self.id, is_train=True)
+        if(self.unlearning and self.train_poision==None):
+            # 我们这里target class 随便选择一个
+            train_data,self.train_poision = create_poisioned_dataset(train_data,self.test_poision[0][1],is_train=True)
+        elif(self.unlearning):
+            train_data=ConcatDataset([train_data,self.train_poision])
         return DataLoader(train_data, batch_size, drop_last=True, shuffle=True)
 
     def load_test_data(self, batch_size=None):
         if batch_size == None:
             batch_size = self.batch_size
         test_data = read_client_data(self.dataset, self.id, is_train=False)
+        if(self.unlearning and self.test_poision==None):
+            test_data,self.test_poision = create_poisioned_dataset(test_data,test_data[0][1],is_train=False)
+        elif(self.unlearning):
+            test_data=self.test_poision
         return DataLoader(test_data, batch_size, drop_last=False, shuffle=True)
         
     def set_parameters(self, model):
@@ -88,6 +101,7 @@ class Client(object):
         y_prob = []
         y_true = []
         
+
         with torch.no_grad():
             for x, y in testloaderfull:
                 if type(x) == type([]):
@@ -96,6 +110,9 @@ class Client(object):
                     x = x.to(self.device)
                 y = y.to(self.device)
                 output = self.model(x)
+
+                # if(self.unlearning):
+                #     print("after",output[0])
 
                 test_acc += (torch.sum(torch.argmax(output, dim=1) == y)).item()
                 test_num += y.shape[0]
@@ -111,9 +128,10 @@ class Client(object):
 
         # self.model.cpu()
         # self.save_model(self.model, 'model')
-
         y_prob = np.concatenate(y_prob, axis=0)
         y_true = np.concatenate(y_true, axis=0)
+
+        # print("y_prob",y_prob,"y_true",y_true)
 
         auc = metrics.roc_auc_score(y_true, y_prob, average='micro')
         

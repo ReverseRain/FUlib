@@ -18,7 +18,7 @@
 import numpy as np
 import os
 import torch
-
+from torch.utils.data import random_split,ConcatDataset
 
 def read_data(dataset, idx, is_train=True):
     if is_train:
@@ -115,3 +115,23 @@ def read_proxy_data(dataset):
     # proxy_data = [(x, y) for x, y in zip(X_proxy, y_proxy)]
     
     return proxy_data
+
+def create_poisioned_dataset(origin_data,target_label,is_train):
+    num_poison = int(0.4 * len(origin_data)) if is_train else len(origin_data)
+    
+    poison_dataset, clean_dataset = random_split(origin_data, [num_poison, len(origin_data) - num_poison])
+    poison_x=backdoor_pattern([x for x,_ in poison_dataset])
+    poison_y=[target_label for _ in range(len(poison_x))]
+
+    poison_dataset=[(x,y) for x,y in zip(poison_x,poison_y)]
+    dataset = ConcatDataset([poison_dataset, origin_data]) if is_train else poison_dataset
+    return dataset,poison_dataset
+
+def backdoor_pattern(imgs):
+    for img in imgs:
+        img[:, 2, 2] = 0
+        img[:, 3, 3] = 0
+        img[:, 4, 4] = 0
+        img[:, 4, 2] = 0
+        img[:, 2, 4] = 0
+    return imgs

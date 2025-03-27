@@ -21,19 +21,19 @@ import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from utils.data_utils import read_proxy_data
-from flcore.clients.clientfukd import clientFUKD
+from flcore.clients.clientbu import clientBU
 from flcore.servers.serverbase import Server
 from threading import Thread
 from utils.attack_utils import attack,train_attack_model
 
 
-class FedFUKD(Server):
+class FedBU(Server):
     def __init__(self, args):
         super().__init__(args)
 
         # select slow clients
         self.set_slow_clients()
-        self.set_clients(clientFUKD)
+        self.set_clients(clientBU)
 
         print(f"\nJoin ratio / total clients: {self.join_ratio} / {self.num_clients}")
         print("Finished creating server and clients.")
@@ -92,7 +92,7 @@ class FedFUKD(Server):
 
         if self.num_new_clients > 0:
             self.eval_new_clients = True
-            self.set_new_clients(clientFUKD)
+            self.set_new_clients(clientBU)
             print(f"\n-------------Fine tuning round-------------")
             print("\nEvaluate new clients")
             self.evaluate()
@@ -108,53 +108,24 @@ class FedFUKD(Server):
     def unlearning(self):
         attack_model=train_attack_model(self.global_model,self.clients,self.num_classes,self.device)
         (PRE_old, REC_old) = attack(self.global_model,attack_model,self.unlearning_clients,self.num_classes,self.device)
-        teacher_model =copy.deepcopy(self.global_model)
-        for c in self.unlearning_clients:
-            i=c.id
-            for j in range(len(self.history_update[i])):
-                for param1, diff in zip(self.global_model.parameters(), self.history_update[i][j]):
-                    # param1.data -= torch.tensor([x / len(self.clients) for x in diff])
-                    param1.data -= diff/len(self.clients)
-                    
+    
+        self.clients== [client for client in self.clients if client not in self.unlearning_clients]
         
-        
-        self.clients = [client for client in self.clients if client not in self.unlearning_clients]
-        opt_ul=torch.optim.SGD(self.global_model.parameters(), lr=0.01)
-        
-        proxy_loader=self.proxy_load()
 
         for i in range(self.global_rounds+1):
             s_t = time.time()
             print(f"\n-------------Round number: {i}-------------")
             print("\nEvaluate global model")
 
-            self.send_models()
+            self.send_models_target()
             self.evaluate(isUnlearning=True)
-            self.global_model.train()
-
-            # print(self.global_model.head.weight[:2])
-            # print(teacher_model.head.weight[:2])
-
-            for i, x in enumerate(proxy_loader):
-
-                if type(x) == type([]):
-                    x[0] = x[0].to(self.device)
-                else:
-                    x = x.to(self.device)
-                
-                output_student = self.global_model(x)
-                output_teacher = teacher_model(x)
-                q_i=F.softmax(output_teacher/3,dim=-1)
-                q_c=F.softmax(output_student/3,dim=-1)
-
-                loss=F.kl_div(q_i.log(), q_c, reduction='batchmean')
-
-
-                opt_ul.zero_grad()
-                loss.backward()
-                opt_ul.step()
-
-            # print(self.global_model.head.weight[:2])
+            for client in self.unlearning_clients:
+                client.unlearning_train()
+            
+            self.receive_models_target()
+            
+            self.aggregate_parameters()
+            
             self.unlearn_Budget.append(time.time() - s_t)
             print('-'*25, 'time cost', '-'*25, self.unlearn_Budget[-1])
         (PRE_unlearning, REC_unlearning) = attack(self.global_model,attack_model,self.unlearning_clients,self.num_classes,self.device)
@@ -168,8 +139,32 @@ class FedFUKD(Server):
         self.save_results()
         self.save_global_model()
 
-    def proxy_load(self):
-        data = read_proxy_data(self.dataset)
-        return DataLoader(data, 32, shuffle=True)
+    def send_models_target(self):
+        assert (len(self.unlearning_clients) > 0)
+        # 向target client send 模型
+        for client in self.unlearning_clients:
+            start_time = time.time()
+            
+            client.set_parameters(self.global_model)
     
+    def receive_models_target(self):
+        assert (len(self.unlearning_clients) > 0)
+
+        self.uploaded_ids = []
+        self.uploaded_weights = []
+        self.uploaded_models = []
+        tot_samples = 0
+        for client in self.unlearning_clients:
+            try:
+                client_time_cost = client.train_time_cost['total_cost'] / client.train_time_cost['num_rounds'] + \
+                        client.send_time_cost['total_cost'] / client.send_time_cost['num_rounds']
+            except ZeroDivisionError:
+                client_time_cost = 0
+            if client_time_cost <= self.time_threthold:
+                tot_samples += client.train_samples
+                self.uploaded_ids.append(client.id)
+                self.uploaded_weights.append(client.train_samples)
+                self.uploaded_models.append(client.model)
+        for i, w in enumerate(self.uploaded_weights):
+            self.uploaded_weights[i] = w / tot_samples
     
