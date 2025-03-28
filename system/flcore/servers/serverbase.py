@@ -256,7 +256,7 @@ class Server(object):
         return ids, num_samples, losses
 
     # evaluate selected clients
-    def evaluate(self, acc=None, loss=None,isUnlearning=False):
+    def evaluate(self, acc=None, loss=None):
         stats = self.test_metrics()
         stats_train = self.train_metrics()
 
@@ -408,13 +408,32 @@ class Server(object):
 
         return ids, num_samples, tot_correct, tot_auc
     
-    def unlearning(self,unlearning_client):
-        pass
+    # def send_models_target(self):
+    #     assert (len(self.unlearning_clients) > 0)
+    #     # 向target client send 模型
+    #     for client in self.unlearning_clients:
+    #         start_time = time.time()
+            
+    #         client.set_parameters(self.global_model)
+    
+    def receive_models_target(self):
+        assert (len(self.unlearning_clients) > 0)
 
-    def train_metrics_unlearning(self):
-        # accuarcy, KL divergensy,  Loss 
-
-        pass
-
-    def test_metrics_unlearning(self):
-        pass
+        self.uploaded_ids = []
+        self.uploaded_weights = []
+        self.uploaded_models = []
+        tot_samples = 0
+        for client in self.unlearning_clients:
+            try:
+                client_time_cost = client.train_time_cost['total_cost'] / client.train_time_cost['num_rounds'] + \
+                        client.send_time_cost['total_cost'] / client.send_time_cost['num_rounds']
+            except ZeroDivisionError:
+                client_time_cost = 0
+            if client_time_cost <= self.time_threthold:
+                tot_samples += client.train_samples
+                self.uploaded_ids.append(client.id)
+                self.uploaded_weights.append(client.train_samples)
+                self.uploaded_models.append(client.model)
+        for i, w in enumerate(self.uploaded_weights):
+            self.uploaded_weights[i] = w / tot_samples
+    

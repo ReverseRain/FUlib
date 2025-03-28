@@ -41,7 +41,6 @@ class FedBU(Server):
         # self.load_model()
         self.Budget = []
         self.unlearn_Budget=[] #计时unlearning的时间
-        self.history_update=[[] for _ in range(self.num_clients)]
 
 
 
@@ -71,7 +70,6 @@ class FedBU(Server):
             if self.dlg_eval and i%self.dlg_gap == 0:
                 self.call_dlg(i)
             
-            self.collect_delta()
             self.aggregate_parameters()
 
             self.Budget.append(time.time() - s_t)
@@ -97,12 +95,6 @@ class FedBU(Server):
             print("\nEvaluate new clients")
             self.evaluate()
 
-    def collect_delta(self):
-        for cid, client_model in zip(self.uploaded_ids, self.uploaded_models):
-            origin_grad = []
-            for gp, pp in zip(self.global_model.parameters(), client_model.parameters()):
-                origin_grad.append(gp.data - pp.data)
-            self.history_update[cid].append(origin_grad)
     
 
     def unlearning(self):
@@ -117,8 +109,8 @@ class FedBU(Server):
             print(f"\n-------------Round number: {i}-------------")
             print("\nEvaluate global model")
 
-            self.send_models_target()
-            self.evaluate(isUnlearning=True)
+            self.send_models()
+            self.evaluate()
             for client in self.unlearning_clients:
                 client.unlearning_train()
             
@@ -139,32 +131,3 @@ class FedBU(Server):
         self.save_results()
         self.save_global_model()
 
-    def send_models_target(self):
-        assert (len(self.unlearning_clients) > 0)
-        # 向target client send 模型
-        for client in self.unlearning_clients:
-            start_time = time.time()
-            
-            client.set_parameters(self.global_model)
-    
-    def receive_models_target(self):
-        assert (len(self.unlearning_clients) > 0)
-
-        self.uploaded_ids = []
-        self.uploaded_weights = []
-        self.uploaded_models = []
-        tot_samples = 0
-        for client in self.unlearning_clients:
-            try:
-                client_time_cost = client.train_time_cost['total_cost'] / client.train_time_cost['num_rounds'] + \
-                        client.send_time_cost['total_cost'] / client.send_time_cost['num_rounds']
-            except ZeroDivisionError:
-                client_time_cost = 0
-            if client_time_cost <= self.time_threthold:
-                tot_samples += client.train_samples
-                self.uploaded_ids.append(client.id)
-                self.uploaded_weights.append(client.train_samples)
-                self.uploaded_models.append(client.model)
-        for i, w in enumerate(self.uploaded_weights):
-            self.uploaded_weights[i] = w / tot_samples
-    

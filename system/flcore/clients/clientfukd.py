@@ -26,13 +26,10 @@ from flcore.clients.clientbase import Client
 class clientFUKD(Client):
     def __init__(self, args, id, train_samples, test_samples, **kwargs):
         super().__init__(args, id, train_samples, test_samples, **kwargs)
-
-        # self.opt_un== torch.optim.SGD(self.teacher_model.parameters(), lr=self.learning_rate)
         
 
     def train(self):
         trainloader = self.load_train_data()
-        global_model=copy.deepcopy(self.model)
         # self.model.to(self.device)
         self.model.train()
         

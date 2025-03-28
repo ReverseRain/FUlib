@@ -21,19 +21,19 @@ import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from utils.data_utils import read_proxy_data
-from flcore.clients.clientfukd import clientFUKD
+from flcore.clients.clientee import clientEE
 from flcore.servers.serverbase import Server
 from threading import Thread
 from utils.attack_utils import attack,train_attack_model
 
 
-class FedFUKD(Server):
+class FedEE(Server):
     def __init__(self, args):
         super().__init__(args)
 
         # select slow clients
         self.set_slow_clients()
-        self.set_clients(clientFUKD)
+        self.set_clients(clientEE)
 
         print(f"\nJoin ratio / total clients: {self.join_ratio} / {self.num_clients}")
         print("Finished creating server and clients.")
@@ -41,7 +41,7 @@ class FedFUKD(Server):
         # self.load_model()
         self.Budget = []
         self.unlearn_Budget=[] #计时unlearning的时间
-        self.history_update=[[] for _ in range(self.num_clients)]
+        self.history_models=[[] for _ in range(self.num_clients)]
 
 
 
@@ -71,7 +71,7 @@ class FedFUKD(Server):
             if self.dlg_eval and i%self.dlg_gap == 0:
                 self.call_dlg(i)
             
-            self.collect_delta()
+            self.collect_models()
             self.aggregate_parameters()
 
             self.Budget.append(time.time() - s_t)
@@ -92,68 +92,66 @@ class FedFUKD(Server):
 
         if self.num_new_clients > 0:
             self.eval_new_clients = True
-            self.set_new_clients(clientFUKD)
+            self.set_new_clients(clientEE)
             print(f"\n-------------Fine tuning round-------------")
             print("\nEvaluate new clients")
             self.evaluate()
 
-    def collect_delta(self):
+    def collect_models(self):
+        
         for cid, client_model in zip(self.uploaded_ids, self.uploaded_models):
-            origin_grad = []
-            for gp, pp in zip(self.global_model.parameters(), client_model.parameters()):
-                origin_grad.append(gp.data - pp.data)
-            self.history_update[cid].append(origin_grad)
+            self.history_models[cid].append(client_model)
     
 
     def unlearning(self):
         attack_model=train_attack_model(self.global_model,self.clients,self.num_classes,self.device)
         (PRE_old, REC_old) = attack(self.global_model,attack_model,self.unlearning_clients,self.num_classes,self.device)
         teacher_model =copy.deepcopy(self.global_model)
-        for c in self.unlearning_clients:
-            i=c.id
-            for j in range(len(self.history_update[i])):
-                for param1, diff in zip(self.global_model.parameters(), self.history_update[i][j]):
-                    # param1.data -= torch.tensor([x / len(self.clients) for x in diff])
-                    param1.data -= diff/len(self.clients)
-                    
-        
-        
         self.clients = [client for client in self.clients if client not in self.unlearning_clients]
-        opt_ul=torch.optim.SGD(self.global_model.parameters(), lr=0.01)
-        
-        proxy_loader=self.proxy_load()
 
-        for i in range(self.global_rounds+1):
+        for param in self.global_model.parameters():
+            param.data.zero_()
+        for c in self.clients:
+            for param1, param2 in zip(self.global_model.parameters(), c.model.parameters()):
+                param1.data += param2/len(self.clients)
+        
+
+        for i in range(int(self.global_rounds/2)+1):
             s_t = time.time()
             print(f"\n-------------Round number: {i}-------------")
             print("\nEvaluate global model")
 
             self.send_models()
             self.evaluate()
-            self.global_model.train()
+            for client in self.unlearning_clients:
+                client.unlearning_train()
+            
+            self.receive_models_target()
+            
+            self.aggregate_parameters()
+            
+            self.unlearn_Budget.append(time.time() - s_t)
+            print('-'*25, 'time cost', '-'*25, self.unlearn_Budget[-1])
 
 
-            for i, x in enumerate(proxy_loader):
+        print(f"\n============= Post learing start =============")
+        for i in range(int(self.global_rounds/2)+1):
+            s_t = time.time()
+            print(f"\n-------------Round number: {i}-------------")
+            print("\nEvaluate global model")
 
-                if type(x) == type([]):
-                    x[0] = x[0].to(self.device)
-                else:
-                    x = x.to(self.device)
-                
-                output_student = self.global_model(x)
-                output_teacher = teacher_model(x)
-                q_i=F.softmax(output_teacher/3,dim=-1)
-                q_c=F.softmax(output_student/3,dim=-1)
-
-                loss=F.kl_div(q_i.log(), q_c, reduction='batchmean')
-
-
-                opt_ul.zero_grad()
-                loss.backward()
-                opt_ul.step()
+            self.send_models()
+            self.evaluate()
+            for client in self.clients:
+                client.train()
+            
+            self.receive_models()
+            
+            self.aggregate_parameters()
 
             self.unlearn_Budget.append(time.time() - s_t)
             print('-'*25, 'time cost', '-'*25, self.unlearn_Budget[-1])
+        
         (PRE_unlearning, REC_unlearning) = attack(self.global_model,attack_model,self.unlearning_clients,self.num_classes,self.device)
         
         print("MIA Attacker to old model precision = {:.4f}".format(PRE_old))
@@ -164,9 +162,6 @@ class FedFUKD(Server):
         
         self.save_results()
         self.save_global_model()
+    
 
-    def proxy_load(self):
-        data = read_proxy_data(self.dataset)
-        return DataLoader(data, 32, shuffle=True)
-    
-    
+

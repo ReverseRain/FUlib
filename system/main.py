@@ -10,6 +10,7 @@ from flcore.trainmodel.models import *
 
 from flcore.servers.serverfukd import FedFUKD
 from flcore.servers.serverbu import FedBU
+from flcore.servers.serveree import FedEE
 
 
 def run(arg):
@@ -53,6 +54,9 @@ def run(arg):
         args.model.fc = nn.Identity()
         args.model = BaseHeadSplit(args.model, args.head)
         server = FedBU(args)
+    elif args.algorithm == "FedEE":
+        # 本方法是复现论文 https://arxiv.org/pdf/2207.05521
+        server = FedEE(args)
         
 
     server.train()
