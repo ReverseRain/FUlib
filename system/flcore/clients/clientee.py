@@ -1,19 +1,3 @@
-# PFLlib: Personalized Federated Learning Algorithm Library
-# Copyright (C) 2021  Jianqing Zhang
-
-# This program is free software; you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation; either version 2 of the License, or
-# (at your option) any later version.
-
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-
-# You should have received a copy of the GNU General Public License along
-# with this program; if not, write to the Free Software Foundation, Inc.,
-# 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 
 import copy
 import torch
@@ -54,7 +38,7 @@ class clientEE(Client):
 
                 self.optimizer.zero_grad()
                 loss.backward()
-                torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=100.0)
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=50.0)
                 self.optimizer.step()
 
 
@@ -76,7 +60,6 @@ class clientEE(Client):
         theta=torch.norm((w_ref-torch.randn_like(w_ref)),p=2)/2400
         for i in range(9):
             theta+=torch.norm((w_ref-torch.randn_like(w_ref)),p=2)/2400
-        print("theta is",theta)
 
         for epoch in range(max_local_epochs):
             for i, (x, y) in enumerate(trainloader):
@@ -90,7 +73,7 @@ class clientEE(Client):
                 loss = -self.loss(output, y)
                 self.optimizer.zero_grad()
                 loss.backward()
-                torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=5.0)
                 self.optimizer.step()
 
                 w = torch.cat([p.data.view(-1) for p in self.model.parameters()], dim=0)

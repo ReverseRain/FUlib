@@ -11,6 +11,7 @@ from flcore.trainmodel.models import *
 from flcore.servers.serverfukd import FedFUKD
 from flcore.servers.serverbu import FedBU
 from flcore.servers.serveree import FedEE
+from flcore.servers.servergem import FedGEM
 
 
 def run(arg):
@@ -56,7 +57,16 @@ def run(arg):
         server = FedBU(args)
     elif args.algorithm == "FedEE":
         # 本方法是复现论文 https://arxiv.org/pdf/2207.05521
+        args.head = copy.deepcopy(args.model.fc)
+        args.model.fc = nn.Identity()
+        args.model = BaseHeadSplit(args.model, args.head)
         server = FedEE(args)
+    elif args.algorithm == "FedGEM":
+        # 本方法是基于增量学习中的GEM修改而来 论文题目：Gradient Episodic Memory for Continual Learning
+        args.head = copy.deepcopy(args.model.fc)
+        args.model.fc = nn.Identity()
+        args.model = BaseHeadSplit(args.model, args.head)
+        server = FedGEM(args)
         
 
     server.train()
