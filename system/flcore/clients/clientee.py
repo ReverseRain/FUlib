@@ -76,9 +76,9 @@ class clientEE(Client):
                 torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=5.0)
                 self.optimizer.step()
 
-                w = torch.cat([p.data.view(-1) for p in self.model.parameters()], dim=0)
-                w=self.projection(w,w_ref,theta)
-                self.load_flattened_vector_to_model(self.model,w)
+                # w = torch.cat([p.data.view(-1) for p in self.model.parameters()], dim=0)
+                # w=self.projection(w,w_ref,theta)
+                # self.load_flattened_vector_to_model(self.model,w)
         
 
     def projection(self,w, w_ref, theta):

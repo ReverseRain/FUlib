@@ -57,7 +57,7 @@ class clientGEM(Client):
         grads = torch.cat([p.grad.view(-1) for p in self.model.parameters() if p.requires_grad], dim=0)  
         pm = torch.zeros_like(grads)
         normal_output=(torch.ones(self.num_classes) / self.num_classes).to(self.device)
-        
+
         for i, (x, y) in enumerate(trainloader):
             if type(x) == type([]):
                 x[0] = x[0].to(self.device)

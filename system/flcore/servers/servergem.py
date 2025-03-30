@@ -174,6 +174,7 @@ class FedGEM(Server):
         optimizer = torch.optim.Adam([v], lr=0.01)
         
         for _ in range(100):
+            # 计算目标函数: 0.5 * v^T (G G^T) v + g^T G^T v
             GGT = torch.mm(G, G.T)                # [num_old_tasks, num_old_tasks]
             Gg = torch.mv(G, g)                   # [num_old_tasks]
             loss = 0.5 * torch.dot(v, torch.mv(GGT, v)) + torch.dot(v, Gg)
