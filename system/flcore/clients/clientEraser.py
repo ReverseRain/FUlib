@@ -18,11 +18,13 @@ class Client:
     def train(self):
         """在本地数据上训练模型"""
         self.model.train()
+        device = next(self.model.parameters()).device
         optimizer = optim.SGD(self.model.parameters(), lr=self.args.local_lr)
         loss_fn = nn.CrossEntropyLoss()
 
         for epoch in range(self.args.local_epoch):
             for data, target in self.train_loader:
+                data, target = data.to(device), target.to(device)
                 optimizer.zero_grad()
                 output = self.model(data)
                 loss = loss_fn(output, target)

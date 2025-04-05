@@ -39,12 +39,17 @@ class Server:
     def evaluate(self):
         """在测试集上评估全局模型"""
         self.global_model.eval()
+        device = next(self.global_model.parameters()).device
+
         correct, total = 0, 0
         with torch.no_grad():
             for data, target in self.test_loader:
+                data, target = data.to(device), target.to(device)
                 output = self.global_model(data)
                 pred = output.argmax(dim=1)
                 correct += (pred == target).sum().item()
                 total += target.size(0)
+
         acc = correct / total
         print(f"[Server] Test Accuracy: {acc:.4f}")
+
