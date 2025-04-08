@@ -1,0 +1,117 @@
+[33mcommit d789f2deff31539a366c51742fa0dd9aa6c45eeb[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m)[m
+Author: 50859140 <50859140@qq.com>
+Date:   Tue Apr 8 15:35:11 2025 +0800
+
+    Initial commit
+
+ .idea/.gitignore                                   |   8 [32m+++[m
+ .idea/inspectionProfiles/profiles_settings.xml     |   6 [32m++[m
+ .idea/misc.xml                                     |   7 [32m+++[m
+ .idea/modules.xml                                  |   8 [32m+++[m
+ .idea/mufc.iml                                     |  12 [32m++++[m
+ .idea/vcs.xml                                      |   6 [32m++[m
+ 4celltypes_10pca.pkl                               | Bin [31m0[m -> [32m1937839[m bytes
+ How_to_use.md                                      |   4 [32m++[m
+ bot_attack.pkl                                     | Bin [31m0[m -> [32m1881730505[m bytes
+ check.py                                           |  33 [32m++++++++++[m
+ covtype_multiclass.pkl                             | Bin [31m0[m -> [32m12697878[m bytes
+ data.zip                                           | Bin [31m0[m -> [32m299140420[m bytes
+ data/4celltypes_10pca1.pkl                         | Bin [31m0[m -> [32m972966[m bytes
+ data/bot_attack1.pkl                               | Bin [31m0[m -> [32m944980758[m bytes
+ data/celltype_processed.pkl                        | Bin [31m0[m -> [32m1940897[m bytes
+ data/covtype_multiclass1.pkl                       | Bin [31m0[m -> [32m6411090[m bytes
+ data/mnist1.pkl                                    | Bin [31m0[m -> [32m376800211[m bytes
+ data/postures1.pkl                                 | Bin [31m0[m -> [32m9597014[m bytes
+ get.py                                             |  30 [32m+++++++++[m
+ kmeans_data_deletion_NeurIPS19_datasets_scaled.p   | Bin [31m0[m -> [32m1338761662[m bytes
+ ...ns_data_deletion_NeurIPS19_datasets_scaled.p.gz | Bin [31m0[m -> [32m299846398[m bytes
+ mnist.pkl                                          | Bin [31m0[m -> [32m753126058[m bytes
+ mnist1.pkl                                         | Bin [31m0[m -> [32m376800211[m bytes
+ mufc_main.py                                       |   5 [32m+[m[31m-[m
+ pick.py                                            |  21 [32m+++++++[m
+ postures.pkl                                       | Bin [31m0[m -> [32m18590761[m bytes
+ results_padded.csv                                 |  12 [32m++++[m
+ transf.py                                          |  70 [32m+++++++++++++++++++++[m
+ 28 files changed, 221 insertions(+), 1 deletion(-)
+
+[33mcommit be95c75167547aa21556a9feaeed60a0afa59854[m
+Author: Chao Pan <chaopan2@illinois.edu>
+Date:   Thu Oct 12 10:43:39 2023 -0500
+
+    Update readme
+
+ README.md | 2 [32m+[m[31m-[m
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+[33mcommit c4e3f1b93ecd5cc58a072ee135a438eff462832c[m
+Merge: 8c94c0c fc3c7e7
+Author: Chao Pan <chaopan2@illinois.edu>
+Date:   Thu Oct 12 10:37:31 2023 -0500
+
+    Merge branch 'main' of https://github.com/thupchnsky/mufc
+
+[33mcommit 8c94c0cb8790239fde8d33bb6ebd936c17adbb16[m
+Author: Chao Pan <chaopan2@illinois.edu>
+Date:   Wed Oct 11 15:50:53 2023 -0500
+
+    add the function generate_data
+
+ utils.py | 29 [32m+++++++++++++++++++++++++++++[m
+ 1 file changed, 29 insertions(+)
+
+[33mcommit fc3c7e78d7fdd153e3a0082a178fed3b04a6c24f[m
+Author: Chao Pan <50838819+thupchnsky@users.noreply.github.com>
+Date:   Thu Feb 16 16:40:19 2023 -0600
+
+    Update README.md
+    
+    Add Jin as another contributor.
+
+ README.md | 2 [32m+[m[31m-[m
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+[33mcommit 9e6fd983d66645d4293df54f8f10638fcdb5d58a[m
+Author: Chao Pan <50838819+thupchnsky@users.noreply.github.com>
+Date:   Thu Feb 16 14:18:09 2023 -0600
+
+    Update README.md
+
+ README.md | 37 [32m+++++++++++++++++++++++++++++++++++[m[31m--[m
+ 1 file changed, 35 insertions(+), 2 deletions(-)
+
+[33mcommit 0cab49bf29fd5f23c0f4db6a0cbc951d6f596911[m
+Author: Chao Pan <chaopan2@illinois.edu>
+Date:   Thu Feb 16 13:34:28 2023 -0600
+
+    Add source repo url
+
+ dc_kmeans.py | 3 [32m++[m[31m-[m
+ kfed.py      | 3 [32m++[m[31m-[m
+ 2 files changed, 4 insertions(+), 2 deletions(-)
+
+[33mcommit 700db1f95459bf1d5124c0e56802fd83a6c4bbcc[m
+Author: Chao Pan <chaopan2@illinois.edu>
+Date:   Thu Feb 16 13:26:34 2023 -0600
+
+    ICLR camera ready upload
+
+ .gitignore             |   1 [32m+[m
+ README.md              |   6 [32m+[m
+ celltype_processed.pkl | Bin [31m0[m -> [32m1940897[m bytes
+ dc_kmeans.py           | 249 [32m+++++++++++++++++++++++++++[m
+ kfed.py                | 358 [32m+++++++++++++++++++++++++++++++++++++++[m
+ model.py               | 216 [32m+++++++++++++++++++++++[m
+ mufc_main.py           | 451 [32m+++++++++++++++++++++++++++++++++++++++++++++++++[m
+ run.sh                 |   3 [32m+[m
+ utils.py               | 198 [32m++++++++++++++++++++++[m
+ 9 files changed, 1482 insertions(+)
+
+[33mcommit bbe245cd7d872bf6dc21ded53fee641722c6bc9e[m
+Author: Chao Pan <50838819+thupchnsky@users.noreply.github.com>
+Date:   Thu Feb 16 12:01:23 2023 -0600
+
+    Initial commit
+
+ .gitignore | 129 [32m+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++[m
+ LICENSE    |  21 [32m++++++++++[m
+ 2 files changed, 150 insertions(+)
