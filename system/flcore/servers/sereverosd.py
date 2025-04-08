@@ -1,23 +1,24 @@
 
+
 import time
 import copy
 import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from utils.data_utils import read_proxy_data
-from flcore.clients.clientfukd import clientFUKD
+from flcore.clients.clientosd import clientOSD
 from flcore.servers.serverbase import Server
 from threading import Thread
 from utils.attack_utils import attack,train_attack_model
 
 
-class FedFUKD(Server):
+class FedOSD(Server):
     def __init__(self, args):
         super().__init__(args)
 
         # select slow clients
         self.set_slow_clients()
-        self.set_clients(clientFUKD)
+        self.set_clients(clientOSD)
 
         print(f"\nJoin ratio / total clients: {self.join_ratio} / {self.num_clients}")
         print("Finished creating server and clients.")
@@ -25,7 +26,6 @@ class FedFUKD(Server):
         # self.load_model()
         self.Budget = []
         self.unlearn_Budget=[] #计时unlearning的时间
-        self.history_update=[[] for _ in range(self.num_clients)]
 
 
 
@@ -53,7 +53,6 @@ class FedFUKD(Server):
             if self.dlg_eval and i%self.dlg_gap == 0:
                 self.call_dlg(i)
             
-            self.collect_delta()
             self.aggregate_parameters()
 
             self.Budget.append(time.time() - s_t)
@@ -63,47 +62,26 @@ class FedFUKD(Server):
                 break
 
         print("\nBest accuracy.")
-        # self.print_(max(self.rs_test_acc), max(
-        #     self.rs_train_acc), min(self.rs_train_loss))
         print(max(self.rs_test_acc))
         print("\nAverage time cost per round.")
         print(sum(self.Budget[1:])/len(self.Budget[1:]))
 
-        # self.save_results()
-        # self.save_global_model()
 
         if self.num_new_clients > 0:
             self.eval_new_clients = True
-            self.set_new_clients(clientFUKD)
+            self.set_new_clients(clientOSD)
             print(f"\n-------------Fine tuning round-------------")
             print("\nEvaluate new clients")
             self.evaluate()
 
-    def collect_delta(self):
-        for cid, client_model in zip(self.uploaded_ids, self.uploaded_models):
-            origin_grad = []
-            for gp, pp in zip(self.global_model.parameters(), client_model.parameters()):
-                origin_grad.append(gp.data - pp.data)
-            self.history_update[cid].append(origin_grad)
     
 
     def unlearning(self):
         attack_model=train_attack_model(self.global_model,self.clients,self.num_classes,self.device)
         (PRE_old, REC_old) = attack(self.global_model,attack_model,self.unlearning_clients,self.num_classes,self.device)
-        teacher_model =copy.deepcopy(self.global_model)
-        for c in self.unlearning_clients:
-            i=c.id
-            for j in range(len(self.history_update[i])):
-                for param1, diff in zip(self.global_model.parameters(), self.history_update[i][j]):
-                    # param1.data -= torch.tensor([x / len(self.clients) for x in diff])
-                    param1.data -= diff/len(self.clients)
-                    
+    
+        self.clients== [client for client in self.clients if client not in self.unlearning_clients]
         
-        
-        self.clients = [client for client in self.clients if client not in self.unlearning_clients]
-        opt_ul=torch.optim.SGD(self.global_model.parameters(), lr=0.01)
-        
-        proxy_loader=self.proxy_load()
 
         for i in range(self.unlearning_ground+1):
             s_t = time.time()
@@ -111,31 +89,40 @@ class FedFUKD(Server):
             print("\nEvaluate global model")
 
             self.send_models()
+            self.send_models_target()
             self.evaluate()
-            self.global_model.train()
 
+            for client in self.unlearning_clients:
+                client.unlearning_train()
+            for client in self.clients:
+                client.unlearning_train()
+            
+            gm = torch.cat([p.view(-1) for p in self.global_model.parameters()], dim=0)  
+            unlearning_grad = torch.zeros_like(gm)
+            normal_grad=[]
+            # 记录遗忘梯度的方向
+            self.receive_models_target()
+            for weights in self.uploaded_models:
+                pm=torch.cat([p.view(-1) for p in weights.parameters()], dim=0) 
+                unlearning_grad+=(pm-gm)/len(self.uploaded_models)
 
-            for i, x in enumerate(proxy_loader):
+            # 记录正常用户更新的方向
+            self.receive_models()
+            for weights in self.uploaded_models:
+                pm=torch.cat([p.view(-1) for p in weights.parameters()], dim=0) 
+                normal_grad.append(pm-gm)
 
-                if type(x) == type([]):
-                    x[0] = x[0].to(self.device)
-                else:
-                    x = x.to(self.device)
-                
-                output_student = self.global_model(x)
-                output_teacher = teacher_model(x)
-                q_i=F.softmax(output_teacher/3,dim=-1)
-                q_c=F.softmax(output_student/3,dim=-1)
+            normal_grad = [grad.to(dtype=torch.float32) for grad in normal_grad]
+            G = torch.stack(normal_grad, dim=0)
 
-                loss=F.kl_div(q_i.log(), q_c, reduction='batchmean')
-
-
-                opt_ul.zero_grad()
-                loss.backward()
-                opt_ul.step()
-
+            unlearning_grad=self.get_nearest_oth_d(G,unlearning_grad)
+            print(unlearning_grad)
+            self.overwrite_grad(self.global_model.parameters,unlearning_grad*1e7)
+            
             self.unlearn_Budget.append(time.time() - s_t)
             print('-'*25, 'time cost', '-'*25, self.unlearn_Budget[-1])
+
+
         (PRE_unlearning, REC_unlearning) = attack(self.global_model,attack_model,self.unlearning_clients,self.num_classes,self.device)
         
         print("MIA Attacker to old model precision = {:.4f}".format(PRE_old))
@@ -143,9 +130,62 @@ class FedFUKD(Server):
 
         print("MIA Attacker to unlearning model precision = {:.4f}".format(PRE_unlearning))
         print("MIA Attacker to unlearning model recall = {:.4f}".format(REC_unlearning))
-
         self.save_unlearning(PRE_unlearning)
+        
+        print(f"\n============= Post learing start =============")
+        for i in range(int(self.unlearning_ground)+1):
+            s_t = time.time()
+            print(f"\n-------------Round number: {i}-------------")
+            print("\nEvaluate global model")
+
+            self.send_models()
+            self.evaluate()
+            for client in self.clients:
+                client.train()
+            
+            self.receive_models()
+            
+            self.aggregate_parameters()
+
+            self.unlearn_Budget.append(time.time() - s_t)
+            print('-'*25, 'time cost', '-'*25, self.unlearn_Budget[-1])
+
+        
         
         self.save_results()
         self.save_global_model()
+    
+    def get_nearest_oth_d(self, gr_locals, gu):
+        A = gr_locals
+        
+        A_T = A.T
+        c = gu
+        
+        AAT_1 = self.cal_psedoinverse(A @ A_T)  
+        
+        Ac= A @ c.reshape(-1, 1)
+        
+        AAT_1_Ac = AAT_1 @ Ac
+        
+        d = c - (A_T @ AAT_1_Ac).reshape(-1)
+
+        return d
+    
+    def cal_psedoinverse(self, matrix):
+        U, s, V = torch.svd(matrix)  
+        primary_sigma_indices = torch.where(s >= 1e-6)[0]
+        s[primary_sigma_indices] = 1 / s[primary_sigma_indices]
+        S = torch.diag(s)
+        psedoinverse = V @ S @ U.T
+        return psedoinverse
+    
+    def overwrite_grad(self,pp, newgrad):
+        pointer=0
+        for param in pp():
+            num_params = param.numel()
+            
+            param_data = newgrad[pointer : pointer + num_params].view_as(param.data)
+            param.data=param.data-1e-5*(param_data)
+
+            pointer += num_params
 

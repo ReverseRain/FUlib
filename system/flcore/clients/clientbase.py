@@ -15,7 +15,7 @@ class Client(object):
     Base class for clients in federated learning.
     """
 
-    def __init__(self, args, id, train_samples, test_samples, **kwargs):
+    def __init__(self, args, id, train_samples, test_samples,unlearning, **kwargs):
         torch.manual_seed(0)
         self.model = copy.deepcopy(args.model)
         self.algorithm = args.algorithm
@@ -31,9 +31,15 @@ class Client(object):
         self.learning_rate = args.local_learning_rate
         self.local_epochs = args.local_epochs
 
-        self.unlearning=False
-        self.test_poision=None
-        self.train_poision=None
+        self.unlearning=unlearning
+        self.poision_flag=0
+
+        self.test_loader=self.load_test_data()
+        if(self.unlearning):
+            self.train_loader=self.getCleanTrain()
+            self.poision_loader=self.load_train_data()
+        else:
+            self.train_loader=self.load_train_data()
 
         # check BatchNorm
         self.has_BatchNorm = False
@@ -60,21 +66,17 @@ class Client(object):
         if batch_size == None:
             batch_size = self.batch_size
         train_data = read_client_data(self.dataset, self.id, is_train=True)
-        if(self.unlearning and self.train_poision==None):
-            # 我们这里target class 随便选择一个
-            train_data,self.train_poision = create_poisioned_dataset(train_data,self.test_poision[0][1],is_train=True)
-        elif(self.unlearning):
-            train_data=ConcatDataset([train_data,self.train_poision])
+        if(self.unlearning):
+            # 我们这里poision_flag 随便选择一个
+            train_data = create_poisioned_dataset(train_data,self.poision_flag,is_train=True)
         return DataLoader(train_data, batch_size, drop_last=True, shuffle=True)
 
     def load_test_data(self, batch_size=None):
         if batch_size == None:
             batch_size = self.batch_size
         test_data = read_client_data(self.dataset, self.id, is_train=False)
-        if(self.unlearning and self.test_poision==None):
-            test_data,self.test_poision = create_poisioned_dataset(test_data,test_data[0][1],is_train=False)
-        elif(self.unlearning):
-            test_data=self.test_poision
+        if(self.unlearning):
+            test_data = create_poisioned_dataset(test_data,self.poision_flag,is_train=False)
         return DataLoader(test_data, batch_size, drop_last=False, shuffle=True)
         
     def set_parameters(self, model):
@@ -91,7 +93,7 @@ class Client(object):
             param.data = new_param.data.clone()
 
     def test_metrics(self):
-        testloaderfull = self.load_test_data()
+        testloaderfull = self.test_loader
         # self.model = self.load_model('model')
         # self.model.to(self.device)
         self.model.eval()
@@ -111,8 +113,6 @@ class Client(object):
                 y = y.to(self.device)
                 output = self.model(x)
 
-                # if(self.unlearning):
-                #     print("after",output[0])
 
                 test_acc += (torch.sum(torch.argmax(output, dim=1) == y)).item()
                 test_num += y.shape[0]
@@ -174,6 +174,11 @@ class Client(object):
             item_path = self.save_folder_name
         return torch.load(os.path.join(item_path, "client_" + str(self.id) + "_" + item_name + ".pt"))
 
+    def getCleanTrain(self):
+        self.unlearning=False
+        train_loader=self.load_train_data()
+        self.unlearning=True
+        return train_loader
     # @staticmethod
     # def model_exists():
     #     return os.path.exists(os.path.join("models", "server" + ".pt"))

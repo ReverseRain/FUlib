@@ -12,8 +12,12 @@ class clientFUKD(Client):
         super().__init__(args, id, train_samples, test_samples, **kwargs)
         
 
-    def train(self):
-        trainloader = self.load_train_data()
+    def train(self,poison=False):
+        if(self.unlearning and poison):
+            trainloader=self.poision_loader
+            self.train_samples=len(trainloader.dataset)
+        else:
+            trainloader=self.train_loader
         # self.model.to(self.device)
         self.model.train()
         

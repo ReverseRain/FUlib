@@ -13,9 +13,12 @@ class clientEE(Client):
 
         
 
-    def train(self):
-        trainloader = self.load_train_data()
-        # self.model.to(self.device)
+    def train(self,poison=False):
+        if(self.unlearning and poison):
+            trainloader=self.poision_loader
+            self.train_samples=len(trainloader.dataset)
+        else:
+            trainloader=self.train_loader
         self.model.train()
         
         start_time = time.time()
@@ -50,7 +53,6 @@ class clientEE(Client):
         self.train_time_cost['total_cost'] += time.time() - start_time
 
     def unlearning_train(self):
-        trainloader = self.load_train_data()
         self.model.train()
         
         start_time = time.time()
@@ -62,7 +64,7 @@ class clientEE(Client):
             theta+=torch.norm((w_ref-torch.randn_like(w_ref)),p=2)/2400
 
         for epoch in range(max_local_epochs):
-            for i, (x, y) in enumerate(trainloader):
+            for i, (x, y) in enumerate(self.train_loader):
                 if type(x) == type([]):
                     x[0] = x[0].to(self.device)
                 else:

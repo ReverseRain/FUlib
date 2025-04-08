@@ -34,8 +34,6 @@ class FedGEM(Server):
 
 
     def train(self):
-        for c in self.unlearning_clients:
-            c.unlearning=True
         for i in range(self.global_rounds+1):
             s_t = time.time()
             self.selected_clients = self.select_clients()
@@ -47,7 +45,7 @@ class FedGEM(Server):
                 self.evaluate()
 
             for client in self.selected_clients:
-                client.train()
+                client.train(poison=((self.global_rounds-i)<5))
 
             # threads = [Thread(target=client.train)
             #            for client in self.selected_clients]
@@ -90,9 +88,8 @@ class FedGEM(Server):
         (PRE_old, REC_old) = attack(self.global_model,attack_model,self.unlearning_clients,self.num_classes,self.device)
     
         self.clients== [client for client in self.clients if client not in self.unlearning_clients]
-        opt_ul=torch.optim.SGD(self.global_model.parameters(), lr=0.01)
 
-        for i in range(self.global_rounds+1):
+        for i in range(self.unlearning_ground+1):
             s_t = time.time()
             print(f"\n-------------Round number: {i}-------------")
             print("\nEvaluate global model")
@@ -105,19 +102,16 @@ class FedGEM(Server):
             unlearning_grad = torch.zeros_like(grads)
             normal_grad=[]
 
-            # opt_ul.zero_grad()
             for client in self.unlearning_clients:
                 unlearning_grad+=client.unlearning_train()/len(self.unlearning_clients)
             
             
             for client in self.clients:
                 normal_grad.append(client.unlearning_train())
-            # normal_grad = torch.stack(normal_grad, dim=0)
             
             unlearning_grad=self.PROJECT(unlearning_grad,normal_grad)
             
             self.overwrite_grad(self.global_model.parameters,unlearning_grad)
-            # opt_ul.step()
 
             self.unlearn_Budget.append(time.time() - s_t)
             print('-'*25, 'time cost', '-'*25, self.unlearn_Budget[-1])
@@ -128,6 +122,8 @@ class FedGEM(Server):
 
         print("MIA Attacker to unlearning model precision = {:.4f}".format(PRE_unlearning))
         print("MIA Attacker to unlearning model recall = {:.4f}".format(REC_unlearning))
+
+        # self.save_unlearning(PRE_unlearning)
         
         self.save_results()
         self.save_global_model()
@@ -171,9 +167,9 @@ class FedGEM(Server):
                     requires_grad=True)
     
         # ------ 迭代优化 ------
-        optimizer = torch.optim.Adam([v], lr=0.01)
+        optimizer = torch.optim.Adam([v], lr=0.001)
         
-        for _ in range(100):
+        for _ in range(1000):
             # 计算目标函数: 0.5 * v^T (G G^T) v + g^T G^T v
             GGT = torch.mm(G, G.T)                # [num_old_tasks, num_old_tasks]
             Gg = torch.mv(G, g)                   # [num_old_tasks]
@@ -185,6 +181,5 @@ class FedGEM(Server):
             
             with torch.no_grad():
                 v.data = torch.clamp(v, min=margin)
-        
         g_tilde = g + torch.mv(G.T, v)  # [num_params]
         return g_tilde

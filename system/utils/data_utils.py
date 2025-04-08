@@ -117,15 +117,16 @@ def read_proxy_data(dataset):
     return proxy_data
 
 def create_poisioned_dataset(origin_data,target_label,is_train):
-    num_poison = int(0.5 * len(origin_data)) if is_train else len(origin_data)
+    # num_poison = int(2 * len(origin_data)) if is_train else len(origin_data)
     
-    poison_dataset, clean_dataset = random_split(origin_data, [num_poison, len(origin_data) - num_poison])
-    poison_x=backdoor_pattern([x for x,_ in poison_dataset])
+    # poison_dataset, clean_dataset = random_split(origin_data, [num_poison, len(origin_data) - num_poison])
+    origin_data=3*origin_data if is_train else origin_data
+    poison_x=backdoor_pattern([x for x,_ in origin_data])
     poison_y=[target_label for _ in range(len(poison_x))]
 
     poison_dataset=[(x,y) for x,y in zip(poison_x,poison_y)]
-    dataset = ConcatDataset([poison_dataset, origin_data]) if is_train else poison_dataset
-    return dataset,poison_dataset
+    
+    return poison_dataset
 
 def backdoor_pattern(imgs):
     for img in imgs:

@@ -7,6 +7,7 @@ import h5py
 import copy
 import time
 import random
+import json
 from utils.data_utils import read_client_data
 from utils.dlg import DLG
 from utils.attack_utils import attack,train_attack_model
@@ -65,7 +66,9 @@ class Server(object):
         self.fine_tuning_epoch_new = args.fine_tuning_epoch_new
         
         self.unlearning_clients=args.unlearning_clients #此处传入的仍是id list 在set clients当中变成 clients list
+        self.unlearning_ground=args.unlearning_ground
 
+        self.attack_acc=[]
         # self.attack_model=None
 
     def set_clients(self, clientObj):
@@ -77,7 +80,8 @@ class Server(object):
                             train_samples=len(train_data), 
                             test_samples=len(test_data), 
                             train_slow=train_slow, 
-                            send_slow=send_slow)
+                            send_slow=send_slow,
+                            unlearning= (i in self.unlearning_clients))
             self.clients.append(client)
         self.unlearning_clients=[self.clients[i] for i in self.unlearning_clients]
 
@@ -232,9 +236,10 @@ class Server(object):
         num_samples = []
         losses = []
         for c in self.clients:
-            cl, ns = c.train_metrics()
-            num_samples.append(ns)
-            losses.append(cl*1.0)
+            if(not c.unlearning):
+                cl, ns = c.train_metrics()
+                num_samples.append(ns)
+                losses.append(cl*1.0)
 
         ids = [c.id for c in self.clients]
 
@@ -262,6 +267,8 @@ class Server(object):
             self.rs_train_loss.append(train_loss)
         else:
             loss.append(train_loss)
+
+        self.attack_acc.append(attack_acc)
 
         print("Averaged Train Loss: {:.4f}".format(train_loss))
         print("Averaged Test Accurancy: {:.4f}".format(test_acc))
@@ -421,4 +428,22 @@ class Server(object):
                 self.uploaded_models.append(client.model)
         for i, w in enumerate(self.uploaded_weights):
             self.uploaded_weights[i] = w / tot_samples
+    
+    def save_unlearning(self,mia_pre):
+        entry = {
+            "name":self.algorithm,
+            "test accuracy": self.rs_test_acc,
+            "attack accurancy":self.attack_acc,
+            "time":self.unlearn_Budget,
+            "MIA attack precision":mia_pre
+        }
+        result_path = "../results/json_file/"
+
+        if not os.path.exists(result_path):
+            os.makedirs(result_path)
+        algo = self.dataset + "_" + self.algorithm
+
+        file_path=result_path+"{}.json".format(algo)
+        with open(file_path, 'w') as file:
+            json.dump(entry, file, indent=2)
     

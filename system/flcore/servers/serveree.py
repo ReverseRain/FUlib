@@ -32,8 +32,6 @@ class FedEE(Server):
 
 
     def train(self):
-        for c in self.unlearning_clients:
-            c.unlearning=True
         for i in range(self.global_rounds+1):
             s_t = time.time()
             self.selected_clients = self.select_clients()
@@ -45,7 +43,7 @@ class FedEE(Server):
                 self.evaluate()
 
             for client in self.selected_clients:
-                client.train()
+                client.train(poison=((self.global_rounds-i)<5))
 
             # threads = [Thread(target=client.train)
             #            for client in self.selected_clients]
@@ -101,7 +99,7 @@ class FedEE(Server):
                 param1.data += param2/len(self.clients)
         
 
-        for i in range(int(self.global_rounds/2)+1):
+        for i in range(self.unlearning_ground+1):
             s_t = time.time()
             print(f"\n-------------Round number: {i}-------------")
             print("\nEvaluate global model")
@@ -119,9 +117,17 @@ class FedEE(Server):
             self.unlearn_Budget.append(time.time() - s_t)
             print('-'*25, 'time cost', '-'*25, self.unlearn_Budget[-1])
 
+        (PRE_unlearning, REC_unlearning) = attack(self.global_model,attack_model,self.unlearning_clients,self.num_classes,self.device)
+        
+        print("MIA Attacker to old model precision = {:.4f}".format(PRE_old))
+        print("MIA Attacker to old model recall = {:.4f}".format(REC_old))
+
+        print("MIA Attacker to unlearning model precision = {:.4f}".format(PRE_unlearning))
+        print("MIA Attacker to unlearning model recall = {:.4f}".format(REC_unlearning))
+        self.save_unlearning(PRE_unlearning)
 
         print(f"\n============= Post learing start =============")
-        for i in range(int(self.global_rounds/2)+1):
+        for i in range(int(self.unlearning_ground)+1):
             s_t = time.time()
             print(f"\n-------------Round number: {i}-------------")
             print("\nEvaluate global model")
@@ -138,13 +144,6 @@ class FedEE(Server):
             self.unlearn_Budget.append(time.time() - s_t)
             print('-'*25, 'time cost', '-'*25, self.unlearn_Budget[-1])
         
-        (PRE_unlearning, REC_unlearning) = attack(self.global_model,attack_model,self.unlearning_clients,self.num_classes,self.device)
-        
-        print("MIA Attacker to old model precision = {:.4f}".format(PRE_old))
-        print("MIA Attacker to old model recall = {:.4f}".format(REC_old))
-
-        print("MIA Attacker to unlearning model precision = {:.4f}".format(PRE_unlearning))
-        print("MIA Attacker to unlearning model recall = {:.4f}".format(REC_unlearning))
         
         self.save_results()
         self.save_global_model()

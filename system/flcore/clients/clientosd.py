@@ -7,7 +7,7 @@ import torch.nn.functional as F
 from flcore.clients.clientbase import Client
 
 
-class clientFUKD(Client):
+class clientOSD(Client):
     def __init__(self, args, id, train_samples, test_samples, **kwargs):
         super().__init__(args, id, train_samples, test_samples, **kwargs)
         
@@ -49,3 +49,42 @@ class clientFUKD(Client):
 
         self.train_time_cost['num_rounds'] += 1
         self.train_time_cost['total_cost'] += time.time() - start_time
+    
+    def unlearning_train(self):
+        if(self.unlearning):
+            trainloader=self.poision_loader
+        else:
+            trainloader=self.train_loader
+        # self.model.to(self.device)
+        self.model.train()
+        
+        start_time = time.time()
+
+        max_local_epochs = self.local_epochs
+
+        
+        for i, (x, y) in enumerate(trainloader):
+            if type(x) == type([]):
+                x[0] = x[0].to(self.device)
+            else:
+                x = x.to(self.device)
+            y = y.to(self.device)
+            
+            output = self.model(x)
+            if(self.unlearning):
+                loss=self.UnLearningCELoss(output,y)
+            else:
+                loss = self.loss(output, y)
+            self.optimizer.zero_grad()
+            loss.backward()
+            self.optimizer.step()
+
+
+
+    def UnLearningCELoss(self,pred,target):
+            class_num = int(pred.shape[1])
+            target_enc = F.one_hot(target, class_num)
+            pred = F.softmax(pred, dim=-1)
+            loss = -torch.mean(torch.sum(torch.log(1.0 - pred / 2) * target_enc, dim=1))
+            
+            return loss

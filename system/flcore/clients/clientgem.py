@@ -11,8 +11,12 @@ class clientGEM(Client):
         super().__init__(args, id, train_samples, test_samples, **kwargs)
         
 
-    def train(self):
-        trainloader = self.load_train_data()
+    def train(self,poison=False):
+        if(self.unlearning and poison):
+            trainloader=self.poision_loader
+            self.train_samples=len(trainloader.dataset)
+        else:
+            trainloader=self.train_loader
         # self.model.to(self.device)
         self.model.train()
         
@@ -46,13 +50,13 @@ class clientGEM(Client):
         self.train_time_cost['total_cost'] += time.time() - start_time
     
     def unlearning_train(self):
-        trainloader = self.load_train_data()
+        if(self.unlearning):
+            trainloader = self.poision_loader
+        else:
+            trainloader=self.train_loader
         # self.model.to(self.device)
         self.model.train()
         
-        start_time = time.time()
-
-        max_local_epochs = self.local_epochs
 
         grads = torch.cat([p.grad.view(-1) for p in self.model.parameters() if p.requires_grad], dim=0)  
         pm = torch.zeros_like(grads)
@@ -74,6 +78,5 @@ class clientGEM(Client):
                 loss = self.loss(output, y)
             loss.backward(retain_graph=True)
             pm += torch.cat([p.grad.view(-1) for p in self.model.parameters() if p.requires_grad], dim=0)
-            if(self.unlearning==False and i > int(len(trainloader)*0.1)):
-                return pm/(i+1)
-        return (pm/len(trainloader))
+            
+        return (pm/len(trainloader)) if self.unlearning else pm/len(trainloader)

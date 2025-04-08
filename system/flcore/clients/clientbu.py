@@ -15,8 +15,12 @@ class clientBU(Client):
         # self.opt_un== torch.optim.SGD(self.teacher_model.parameters(), lr=self.learning_rate)
         
 
-    def train(self):
-        trainloader = self.load_train_data()
+    def train(self,poison=False):
+        if(self.unlearning and poison):
+            trainloader=self.poision_loader
+            self.train_samples=len(trainloader.dataset)
+        else:
+            trainloader=self.train_loader
         # self.model.to(self.device)
         self.model.train()
         
@@ -57,12 +61,10 @@ class clientBU(Client):
         
         max_local_epochs = self.local_epochs
         # 获得没有毒数据的正常训练集
-        trainloader = self.getCleanTrain()
-        poison_loader= DataLoader(self.train_poision, self.batch_size, drop_last=True, shuffle=True)
         
         gm = torch.cat([p.data.view(-1) for p in self.model.parameters()], dim=0)
         for epoch in range(max_local_epochs):
-            for (x_pois, y_pois),(x,y) in zip(poison_loader,trainloader):
+            for (x_pois, y_pois),(x,y) in zip(self.poision_loader,self.train_loader):
                 if type(x) == type([]):
                     x[0] = x[0].to(self.device)
                 else:
@@ -102,8 +104,3 @@ class clientBU(Client):
                 self.optimizer.step()
 
 
-    def getCleanTrain(self):
-        self.unlearning=False
-        train_loader=self.load_train_data()
-        self.unlearning=True
-        return train_loader
