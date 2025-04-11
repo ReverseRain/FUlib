@@ -69,7 +69,7 @@ $$
 - ∥Δt∥：保留旧的训练“步长”；
 - ∥Δt′∥：校准出的训练“方向”。
 
-具体过程： 
+具体过程，和FedE相似： 
 
 1、校准训练（Calibration Training）
 
@@ -121,9 +121,90 @@ $$
 - Pk：投影矩阵，映射出客户端 k 所需的嵌入子集
 - L：自对抗负采样损失
 
+首先定义损失函数：对于每个三元组 (h,r,t)∈Gk(h, r, t) \in G_k(h,r,t)∈Gk，定义如下三个损失：
+
+- **预测损失（对比预测）**：
+
+$$
+\mathcal{L}_{\text{predict}} = -\log \sigma(S_{\text{local}}(h, r, t)) - \frac{1}{n} \sum_{(h', r, t') \in N} \log \sigma(-S_{\text{local}}(h', r, t'))
+$$
 
 
 
+- **蒸馏损失**（知识迁移）：
+
+$$
+\mathcal{L}_{\text{distill}} = \text{KL}(P_{\text{local}}, P_{\text{global}})
+$$
+
+
+
+- **联合优化**：
+
+$$
+\mathcal{L}_{\text{local}} = \sum_{(h, r, t)} \left[ \mathcal{L}_{\text{predict}} + \mu_{\text{distill}} \mathcal{L}_{\text{distill}} \right]
+$$
+
+然后定义联邦训练的流程：
+
+1. 初始化全局嵌入E0
+
+2. 每轮通信 t：
+
+   - 选取子集客户端 Kt
+
+   - 对于每个客户端 k∈Kt
+
+     - 服务器发送 Pk x Et作为客户端初始嵌入
+
+     - 客户端优化本地嵌入：
+       $$
+       E_k^{\text{local}} = \arg\min_{E_k} \mathcal{L}_{\text{local}}(E_k; P_k E_t, G_k)
+       $$
+       
+
+     - 客户端用该本地嵌入进一步反向优化全局嵌入：
+       $$
+       E_k^{\text{global}} = \arg\min_{E_k} \mathcal{L}_{\text{global}}(E_k; E_k^{\text{local}}, G_k)
+       $$
+
+     - 上传 Ekglobal
+
+   - 服务端更新全局嵌入：
+     $$
+     E_{t+1} = \left( \frac{1}{\sum_k v_k} \right) \otimes \sum_{k \in \mathcal{K}_t} P_k^\top E_k^{\text{global}}
+     $$
+
+然后训练完成后定义联邦卸载的流程：FedLU结合了 **逆行干扰**(逆数据集训练硬混淆)与 **被动遗忘**（软混淆）。
+
+ Step 1主动干扰：使用三种损失联合扰乱嵌入对删除样本的记忆：
+
+1. **Hard Confusion Loss**：将卸载三元组视为负样本：
+
+$$
+\mathcal{L}_{\text{hard}} = -\log \sigma(-S_{\text{local}}(h, r, t)) - \frac{1}{n} \sum_{(h', r, t')} \log \sigma(-S_{\text{local}}(h', r, t'))
+$$
+
+2. **Soft Confusion Loss**：让得分靠近负样本，防止留下“删除痕迹”：
+
+$$
+\mathcal{L}_{\text{soft}} = \frac{1}{n} \sum_{(h', r, t')} \| S_{\text{local}}(h', r, t') - S_{\text{local}}(h, r, t) \|^2
+$$
+
+
+
+3. **Distillation Loss**：继续保持与全局嵌入的一致性。
+
+最终干扰损失：
+$$
+\mathcal{L}_{\text{interference}} = \mathcal{L}_{\text{hard}} + \mu_{\text{soft}} \mathcal{L}_{\text{soft}} + \mu_{\text{distill}} \mathcal{L}_{\text{distill}}
+$$
+Step 2：被动遗忘
+
+在保留集 Gk 上继续通过双向蒸馏训练：
+
+- 将本地嵌入作为 teacher 更新全局嵌入
+- 再反过来用全局优化本地嵌入
 
 
 
