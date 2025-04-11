@@ -6,7 +6,7 @@ Welcome to *Plato*, a software framework to facilitate scalable, reproducible, a
 
 # Knot算法逻辑解析（基于《Asynchronous Federated Unlearning》论文）
 
-# 📘 Asynchronous Federated Unlearning 算法逻辑解析：KNOT
+#  Asynchronous Federated Unlearning 算法逻辑解析：KNOT
 
 ## 一、背景简介
 
@@ -81,7 +81,7 @@ f = (d_{11}x_{11},\ d_{12}x_{12},\ ..., d_{KN}x_{KN})
 
 ## 四、KNOT 的优缺点分析
 
-### ✅ 优点
+###  优点
 
 1. **高效性显著提升**  
    - 聚类局部重训，避免全局模型回滚；
@@ -101,7 +101,7 @@ f = (d_{11}x_{11},\ d_{12}x_{12},\ ..., d_{KN}x_{KN})
 
 ---
 
-### ⚠️ 缺点与挑战
+### 缺点与挑战
 
 1. **聚类前的开销**  
    - 需要预估每个客户端的训练时间与模型偏差，可能在新环境下需额外通信或预训练一轮。
