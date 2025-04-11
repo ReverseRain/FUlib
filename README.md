@@ -79,7 +79,7 @@ url={https://openreview.net/forum?id=VzwfoFyYDga}
 - 否则，从受影响的聚类开始重跑 K-means++ 初始化（算法 3）；
 - 该过程保证新模型与移除该数据后的模型具有等价分布。
 
-### 🧹 2. 联邦聚类遗忘过程（Algorithm 4）
+###  2. 联邦聚类遗忘过程（Algorithm 4）
 
 - **单客户端数据删除**：
   - 客户端运行算法 3；
