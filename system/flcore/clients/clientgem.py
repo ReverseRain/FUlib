@@ -3,20 +3,19 @@ import torch
 import numpy as np
 import time
 import torch.nn.functional as F
+from torch.utils.data import DataLoader
+import random
 from flcore.clients.clientbase import Client
 
 
 class clientGEM(Client):
     def __init__(self, args, id, train_samples, test_samples, **kwargs):
         super().__init__(args, id, train_samples, test_samples, **kwargs)
-        
-
+        self.proxy_loader=None
+        self.paired_loader=None
+        self.first_time=True
     def train(self,poison=False):
-        if(self.unlearning and poison):
-            trainloader=self.poision_loader
-            self.train_samples=len(trainloader.dataset)
-        else:
-            trainloader=self.train_loader
+        trainloader=self.train_loader
         # self.model.to(self.device)
         self.model.train()
         
@@ -40,27 +39,19 @@ class clientGEM(Client):
                 self.optimizer.zero_grad()
                 loss.backward()
                 self.optimizer.step()
-
-
+                
+        
+        
         if self.learning_rate_decay:
             self.learning_rate_scheduler.step()
-
 
         self.train_time_cost['num_rounds'] += 1
         self.train_time_cost['total_cost'] += time.time() - start_time
     
     def unlearning_train(self):
-        if(self.unlearning):
-            trainloader = self.poision_loader
-        else:
-            trainloader=self.train_loader
-        # self.model.to(self.device)
-        self.model.train()
         
-
-        grads = torch.cat([p.grad.view(-1) for p in self.model.parameters() if p.requires_grad], dim=0)  
-        pm = torch.zeros_like(grads)
-        normal_output=(torch.ones(self.num_classes) / self.num_classes).to(self.device)
+        trainloader=self.paired_loader
+        self.model.train()
 
         for i, (x, y) in enumerate(trainloader):
             if type(x) == type([]):
@@ -68,15 +59,62 @@ class clientGEM(Client):
             else:
                 x = x.to(self.device)
             y = y.to(self.device)
+            output=self.model(x)
+            loss=self.pairLoss(output,y)
             
-            output = self.model(x)
-            
-            if(self.unlearning):
-                output=F.softmax(output,dim=-1)
-                loss=F.kl_div(normal_output.log(), output, reduction='batchmean')*10
-            else:
-                loss = self.loss(output, y)
-            loss.backward(retain_graph=True)
-            pm += torch.cat([p.grad.view(-1) for p in self.model.parameters() if p.requires_grad], dim=0)
-            
-        return (pm/len(trainloader)) if self.unlearning else pm/len(trainloader)
+            self.optimizer_ul.zero_grad()
+            loss.backward()
+            self.optimizer_ul.step()
+
+
+    def NPOLoss(self,pred,target):
+        class_num = int(pred.shape[1])
+        pred = F.softmax(pred, dim=-1)
+        target_enc = F.one_hot(target, class_num)
+        # bata=2
+        # loss = 1/bata * torch.mean((torch.log(1+(torch.sum(pred * target_enc, dim=1)*class_num)**bata)))
+        loss = torch.mean(torch.log(10+(torch.sum(pred * target_enc, dim=1))))
+        return loss
+    def UnLearningCELoss(self,pred,target):
+        class_num = int(pred.shape[1])
+        target_enc = F.one_hot(target, class_num)
+        pred = F.softmax(pred, dim=-1)
+        loss = -torch.mean(torch.sum(torch.log(1.0 - pred / 2) * target_enc, dim=1))
+        
+        return loss
+    def sigLoss(self,pred,target):
+        class_num = int(pred.shape[1])
+        batch=int(pred.shape[0])
+        pred = F.softmax(pred, dim=-1)
+        target_enc = F.one_hot(target, class_num).to(dtype=torch.float32)        
+        t=1.5
+        loss=(-1*torch.mean(torch.log(torch.sigmoid(-1*torch.sum(torch.mul(pred , target_enc /t),dim=1)))))
+        return loss
+    def pairLoss(self,pred,target):
+        pred = F.softmax(pred, dim=-1)
+        t=1.5
+
+        loss=(-1*torch.mean(torch.log(torch.sigmoid(-1*torch.sum(torch.mul(pred , target /t),dim=1)))))
+        return loss
+    
+    def getPairLoader(self):
+        x_all=[]
+        output_all=[]
+        with torch.no_grad():
+            for i, (x, y) in enumerate(self.train_loader):
+                if type(x) == type([]):
+                    x[0] = x[0].to(self.device)
+                else:
+                    x = x.to(self.device)
+                output = self.model(x)
+                output = F.softmax(output, dim=-1)
+
+                x_all.append(x.cpu())
+                output_all.append(output.cpu())
+
+        x_all = torch.cat(x_all, dim=0)
+        output_all = torch.cat(output_all, dim=0)
+
+        paired_data=[(x,y) for x,y in zip(x_all,output_all)]
+        self.paired_loader=DataLoader(paired_data, self.batch_size, drop_last=True, shuffle=True)
+

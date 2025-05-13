@@ -1,0 +1,9 @@
+参数说明
+    -s:一共有三种情况learning，unlearning和retrain
+       learning会保存一个格式为"unleanring_clients+attack".pt的模型参数
+       unlearning会根据参数load对应模型
+       retrain会自动忽略遗忘的客户端从头学习
+    -att：True代表遗忘客户端是有毒数据(后门攻击)，False代表室正常数据
+    -ugr：unlearning的通讯轮数
+    -gr：训练时的通讯轮数
+    -uc：遗忘客户端的id号(可以是多个)

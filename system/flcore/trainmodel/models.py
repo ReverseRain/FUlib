@@ -1,5 +1,7 @@
 import torch
 import torch.nn.functional as F
+import numpy as np
+from sklearn.metrics.pairwise import euclidean_distances
 from torch import nn
 
 batch_size = 10
@@ -70,3 +72,91 @@ class DNN(nn.Module):
         return x
 
 # ====================================================================================================================
+
+class KMeans:
+    def __init__(self, n_clusters=3, max_iter=300, tol=1e-4, random_state=None):
+        self.n_clusters = n_clusters
+        self.max_iter = max_iter
+        self.tol = tol
+        self.random_state = random_state
+        self.centroids = None          # 质心坐标
+        self.labels_ = None            # 样本所属簇标签
+        self.inertia_ = None           # 簇内误差平方和（Inertia）
+        self.n_iter_ = 0               # 实际迭代次数
+
+    def _init_centroids(self):
+        """K-means++ 初始化质心"""
+        np.random.seed(self.random_state)
+        self.kpp_inits = []  # 记录初始化选择的样本索引
+        
+        # 随机选择第一个质心
+        first_idx = np.random.choice(self.n_samples)
+        self.kpp_inits.append(first_idx)
+        self.centroids = self.X[first_idx].reshape(1, -1)
+        
+        # 选择后续质心
+        for _ in range(1, self.n_clusters):
+            # 计算每个样本到最近质心的距离平方
+            distances = self._compute_distances(self.X)
+            min_distances = np.min(distances, axis=1)
+            
+            # 计算选择概率（与距离平方成正比）
+            probabilities = min_distances **2 / np.sum(min_distances**2)
+            
+            next_idx = np.random.choice(self.n_samples, p=probabilities)
+            while next_idx in self.kpp_inits:
+                next_idx = np.random.choice(self.n_samples, p=probabilities)
+                
+            self.kpp_inits.append(next_idx)
+            self.centroids = np.vstack([self.centroids, self.X[next_idx]])
+
+    def _compute_distances(self, X):
+        """计算所有样本到质心的欧氏距离"""
+        return euclidean_distances(X, self.centroids)
+
+    def _assign_clusters(self, X):
+        """分配样本到最近的簇"""
+        distances = self._compute_distances(X)
+        return np.argmin(distances, axis=1)
+
+    def _update_centroids(self, X, labels):
+        new_centroids = np.zeros_like(self.centroids)
+        for i in range(self.n_clusters):
+            cluster_samples = X[labels == i]
+            if len(cluster_samples) > 0:
+                new_centroids[i] = cluster_samples.mean(axis=0)
+        return new_centroids
+
+    def _check_convergence(self, old_centroids):
+        centroid_shift = np.linalg.norm(self.centroids - old_centroids, axis=1).max()
+        return centroid_shift < self.tol
+
+    def fit(self, X):
+        self.X = np.array(X)
+        self.n_samples, self.n_features = self.X.shape
+
+        self._init_centroids()
+
+        for self.n_iter_ in range(1, self.max_iter + 1):
+            old_centroids = self.centroids.copy()
+            self.labels_ = self._assign_clusters(self.X)
+            new_centroids = self._update_centroids(self.X, self.labels_)
+            # 空簇处理​​
+            mask = np.isnan(new_centroids).any(axis=1)
+            n_empty = mask.sum()
+            if n_empty > 0:
+                new_centroids[mask] = self.X[np.random.choice(self.n_samples, n_empty)]
+            
+            self.centroids = new_centroids
+            
+            if self._check_convergence(old_centroids):
+                break
+        
+        distances = self._compute_distances(self.X)
+        self.inertia_ = np.sum(np.min(distances, axis=1) **2)
+        
+        return self
+
+    def predict(self, X):
+        X = np.array(X)
+        return self._assign_clusters(X)

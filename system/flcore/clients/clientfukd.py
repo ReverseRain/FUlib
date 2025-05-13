@@ -13,11 +13,7 @@ class clientFUKD(Client):
         
 
     def train(self,poison=False):
-        if(self.unlearning and poison):
-            trainloader=self.poision_loader
-            self.train_samples=len(trainloader.dataset)
-        else:
-            trainloader=self.train_loader
+        trainloader=self.train_loader
         # self.model.to(self.device)
         self.model.train()
         

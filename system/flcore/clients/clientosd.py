@@ -12,12 +12,8 @@ class clientOSD(Client):
         super().__init__(args, id, train_samples, test_samples, **kwargs)
         
 
-    def train(self,poison=False):
-        if(self.unlearning and poison):
-            trainloader=self.poision_loader
-            self.train_samples=len(trainloader.dataset)
-        else:
-            trainloader=self.train_loader
+    def train(self):
+        trainloader=self.train_loader
         # self.model.to(self.device)
         self.model.train()
         
@@ -51,16 +47,15 @@ class clientOSD(Client):
         self.train_time_cost['total_cost'] += time.time() - start_time
     
     def unlearning_train(self):
-        if(self.unlearning):
-            trainloader=self.poision_loader
-        else:
-            trainloader=self.train_loader
+        trainloader=self.train_loader
         # self.model.to(self.device)
         self.model.train()
         
         start_time = time.time()
 
         max_local_epochs = self.local_epochs
+        normal_output=(torch.ones(self.num_classes) / self.num_classes).to(self.device)
+
 
         
         for i, (x, y) in enumerate(trainloader):
@@ -71,20 +66,21 @@ class clientOSD(Client):
             y = y.to(self.device)
             
             output = self.model(x)
-            if(self.unlearning):
-                loss=self.UnLearningCELoss(output,y)
-            else:
-                loss = self.loss(output, y)
-            self.optimizer.zero_grad()
+
+            loss=self.UnLearningCELoss(output,y)
+            # output=F.softmax(output,dim=-1)
+            # loss=F.kl_div(normal_output.log(), output, reduction='batchmean')
+            
+            self.optimizer_ul.zero_grad()
             loss.backward()
-            self.optimizer.step()
+            self.optimizer_ul.step()
 
 
 
     def UnLearningCELoss(self,pred,target):
-            class_num = int(pred.shape[1])
-            target_enc = F.one_hot(target, class_num)
-            pred = F.softmax(pred, dim=-1)
-            loss = -torch.mean(torch.sum(torch.log(1.0 - pred / 2) * target_enc, dim=1))
-            
-            return loss
+        class_num = int(pred.shape[1])
+        target_enc = F.one_hot(target, class_num)
+        pred = F.softmax(pred, dim=-1)
+        loss = -torch.mean(torch.sum(torch.log(1.0 - pred / 2) * target_enc, dim=1))
+        
+        return loss

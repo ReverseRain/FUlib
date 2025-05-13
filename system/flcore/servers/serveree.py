@@ -43,7 +43,7 @@ class FedEE(Server):
                 self.evaluate()
 
             for client in self.selected_clients:
-                client.train(poison=((self.global_rounds-i)<5))
+                client.train()
 
             # threads = [Thread(target=client.train)
             #            for client in self.selected_clients]

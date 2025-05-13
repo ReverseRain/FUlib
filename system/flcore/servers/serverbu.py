@@ -42,7 +42,7 @@ class FedBU(Server):
                 self.evaluate()
 
             for client in self.selected_clients:
-                client.train(poison=((self.global_rounds-i)<5))
+                client.train()
 
             # threads = [Thread(target=client.train)
             #            for client in self.selected_clients]
@@ -84,7 +84,7 @@ class FedBU(Server):
         attack_model=train_attack_model(self.global_model,self.clients,self.num_classes,self.device)
         (PRE_old, REC_old) = attack(self.global_model,attack_model,self.unlearning_clients,self.num_classes,self.device)
     
-        self.clients== [client for client in self.clients if client not in self.unlearning_clients]
+        self.clients = [client for client in self.clients if client not in self.unlearning_clients]
         
 
         for i in range(self.unlearning_ground+1):

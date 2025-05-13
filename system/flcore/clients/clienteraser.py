@@ -1,4 +1,3 @@
-
 import copy
 import torch
 import numpy as np
@@ -7,17 +6,13 @@ import torch.nn.functional as F
 from flcore.clients.clientbase import Client
 
 
-class clientFUKD(Client):
+class clientEraser(Client):
     def __init__(self, args, id, train_samples, test_samples, **kwargs):
         super().__init__(args, id, train_samples, test_samples, **kwargs)
         
 
-    def train(self,poison=False):
-        if(self.unlearning and poison):
-            trainloader=self.poision_loader
-            self.train_samples=len(trainloader.dataset)
-        else:
-            trainloader=self.train_loader
+    def train(self):
+        trainloader=self.train_loader
         # self.model.to(self.device)
         self.model.train()
         

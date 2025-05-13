@@ -42,7 +42,7 @@ class FedOSD(Server):
                 self.evaluate()
 
             for client in self.selected_clients:
-                client.train(poison=((self.global_rounds-i)<5))
+                client.train()
 
             # threads = [Thread(target=client.train)
             #            for client in self.selected_clients]
@@ -66,6 +66,8 @@ class FedOSD(Server):
         print("\nAverage time cost per round.")
         print(sum(self.Budget[1:])/len(self.Budget[1:]))
 
+        self.save_results()
+        self.save_global_model()
 
         if self.num_new_clients > 0:
             self.eval_new_clients = True
@@ -77,17 +79,19 @@ class FedOSD(Server):
     
 
     def unlearning(self):
+        self.load_model()     
+        
         attack_model=train_attack_model(self.global_model,self.clients,self.num_classes,self.device)
         (PRE_old, REC_old) = attack(self.global_model,attack_model,self.unlearning_clients,self.num_classes,self.device)
     
-        self.clients== [client for client in self.clients if client not in self.unlearning_clients]
+        self.clients = [client for client in self.clients if client not in self.unlearning_clients]
         
-
+        m = torch.cat([p.view(-1) for p in self.global_model.parameters()], dim=0)
         for i in range(self.unlearning_ground+1):
             s_t = time.time()
+            self.selected_clients = self.select_clients()
             print(f"\n-------------Round number: {i}-------------")
             print("\nEvaluate global model")
-
             self.send_models()
             self.send_models_target()
             self.evaluate()
@@ -95,7 +99,8 @@ class FedOSD(Server):
             for client in self.unlearning_clients:
                 client.unlearning_train()
             for client in self.clients:
-                client.unlearning_train()
+                client.train()
+
             
             gm = torch.cat([p.view(-1) for p in self.global_model.parameters()], dim=0)  
             unlearning_grad = torch.zeros_like(gm)
@@ -116,8 +121,7 @@ class FedOSD(Server):
             G = torch.stack(normal_grad, dim=0)
 
             unlearning_grad=self.get_nearest_oth_d(G,unlearning_grad)
-            print(unlearning_grad)
-            self.overwrite_grad(self.global_model.parameters,unlearning_grad*1e7)
+            self.overwrite_grad(self.global_model.parameters,unlearning_grad)
             
             self.unlearn_Budget.append(time.time() - s_t)
             print('-'*25, 'time cost', '-'*25, self.unlearn_Budget[-1])
@@ -131,29 +135,43 @@ class FedOSD(Server):
         print("MIA Attacker to unlearning model precision = {:.4f}".format(PRE_unlearning))
         print("MIA Attacker to unlearning model recall = {:.4f}".format(REC_unlearning))
         self.save_unlearning(PRE_unlearning)
+
+        print(f"\n============= Post training start =============")
         
-        print(f"\n============= Post learing start =============")
-        for i in range(int(self.unlearning_ground)+1):
+
+        for i in range(self.unlearning_ground+1):
             s_t = time.time()
+            self.selected_clients = self.select_clients()
+            self.send_models()
+            self.send_models_target()
+
+            
             print(f"\n-------------Round number: {i}-------------")
             print("\nEvaluate global model")
-
-            self.send_models()
             self.evaluate()
-            for client in self.clients:
+
+            for client in self.selected_clients:
                 client.train()
-            
+
             self.receive_models()
-            
+
+            gm = torch.cat([p.view(-1) for p in self.global_model.parameters()], dim=0)  
+            ga=gm-m
+
             self.aggregate_parameters()
+            ngm = torch.cat([p.view(-1) for p in self.global_model.parameters()], dim=0)
+            gt=(torch.dot((ngm-gm),ga)/(torch.norm(ga)+1e-4)**2 )*ga
+            print(torch.norm(gt),torch.norm(ga))
+            self.overwrite_grad(self.global_model.parameters,gt)
 
-            self.unlearn_Budget.append(time.time() - s_t)
-            print('-'*25, 'time cost', '-'*25, self.unlearn_Budget[-1])
+            self.Budget.append(time.time() - s_t)
+            print('-'*25, 'time cost', '-'*25, self.Budget[-1])
 
+        print("\nBest accuracy.")
+        print(max(self.rs_test_acc))
+        print("\nAverage time cost per round.")
+        print(sum(self.Budget[1:])/len(self.Budget[1:]))
         
-        
-        self.save_results()
-        self.save_global_model()
     
     def get_nearest_oth_d(self, gr_locals, gu):
         A = gr_locals
@@ -185,7 +203,7 @@ class FedOSD(Server):
             num_params = param.numel()
             
             param_data = newgrad[pointer : pointer + num_params].view_as(param.data)
-            param.data=param.data-1e-5*(param_data)
+            param.data=param.data+(param_data)
 
             pointer += num_params
 

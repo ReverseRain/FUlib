@@ -11,18 +11,17 @@ from flcore.trainmodel.models import *
 from flcore.servers.serverfukd import FedFUKD
 from flcore.servers.serverbu import FedBU
 from flcore.servers.serveree import FedEE
-from flcore.servers.sereverosd import FedOSD
+from flcore.servers.serverosd import FedOSD
 from flcore.servers.servergem import FedGEM
+from flcore.servers.serverrome import FedROME
+from flcore.servers.servereraser import FedEraser
 
 
 def run(arg):
     time_list = []
     model_str = args.model
 
-
-    print(f"\n============= Training start =============")
-    print("Creating server and clients ...")
-    start = time.time()
+    
 
     if model_str == "cnn": # ]
         if "MNIST" in args.dataset:
@@ -44,7 +43,12 @@ def run(arg):
 
     print(args.model)
 
-    if args.algorithm == "FedFUKD":
+    if args.algorithm == "FedEraser":
+        args.head = copy.deepcopy(args.model.fc)
+        args.model.fc = nn.Identity()
+        args.model = BaseHeadSplit(args.model, args.head)
+        server = FedEraser(args)
+    elif args.algorithm == "FedFUKD":
         # 本方法是复现论文 https://arxiv.org/pdf/2201.09441
         args.head = copy.deepcopy(args.model.fc)
         args.model.fc = nn.Identity()
@@ -68,29 +72,47 @@ def run(arg):
         args.model.fc = nn.Identity()
         args.model = BaseHeadSplit(args.model, args.head)
         server = FedOSD(args)
+    elif args.algorithm == "FedUG":
+        # 本方法是复现论文 https://arxiv.org/pdf/2412.20200
+        args.head = copy.deepcopy(args.model.fc)
+        args.model.fc = nn.Identity()
+        args.model = BaseHeadSplit(args.model, args.head)
+        server = FedUG(args)
     elif args.algorithm == "FedGEM":
         # 本方法是基于增量学习中的GEM修改而来 论文题目：Gradient Episodic Memory for Continual Learning
         args.head = copy.deepcopy(args.model.fc)
         args.model.fc = nn.Identity()
         args.model = BaseHeadSplit(args.model, args.head)
         server = FedGEM(args)
-        
+    elif args.algorithm == "FedROME":
+        # 本方法是基于RMOE 修改而来
+        args.head = copy.deepcopy(args.model.fc)
+        args.model.fc = nn.Identity()
+        args.model = BaseHeadSplit(args.model, args.head)
+        server = FedROME(args)
+            
+    if(args.learning_state=="learning"):
+        print(f"\n============= Training start =============")
+        print("Creating server and clients ...")
+        start = time.time()
+        server.train()
 
-    server.train()
+        time_list.append(time.time()-start)
 
-    time_list.append(time.time()-start)
-
-    print(f"\nAverage time cost: {round(np.average(time_list), 2)}s.")
-
-    
+        print(f"\nAverage time cost: {round(np.average(time_list), 2)}s.")
 
     # Global average
     # average_data(dataset=args.dataset, algorithm=args.algorithm, goal=args.goal, times=args.times)
+    elif(args.learning_state=="unlearning"):
+        print(f"\n============= Unlearning start =============")
+        server.unlearning()
 
-    print(f"\n============= Unlearning start =============")
-
-    server.unlearning()
-
+    elif(args.learning_state=="retrain"):
+        print(f"\n============= Retrain start =============")
+        
+        server.clients = [client for client in server.clients if client not in server.unlearning_clients]
+        server.train()
+        
     print("All done!")
 
     
@@ -156,7 +178,10 @@ if __name__ == "__main__":
     parser.add_argument("-uc","--unlearning_clients", nargs='+', type=int,default=None,
                          help='an array of integers')
     parser.add_argument("-ugr","--unlearning_ground", type=int,default=2)
-    # parser.add_argument("-tc","--target_class", type=int,default=None) 
+    parser.add_argument("-s","--learning_state", type=str,default="learning")
+    parser.add_argument("-att","--attack", type=bool,default=False)
+    parser.add_argument('-ulr', "--unlearning_rate", type=float, default=0.0005)
+
     args = parser.parse_args()
 
     os.environ["CUDA_VISIBLE_DEVICES"] = args.device_id

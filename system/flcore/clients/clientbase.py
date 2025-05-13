@@ -7,7 +7,7 @@ import os
 from torch.utils.data import DataLoader,ConcatDataset
 from sklearn.preprocessing import label_binarize
 from sklearn import metrics
-from utils.data_utils import read_client_data,create_poisioned_dataset
+from utils.data_utils import read_client_data,create_poisoned_dataset
 
 
 class Client(object):
@@ -25,21 +25,24 @@ class Client(object):
         self.save_folder_name = args.save_folder_name
 
         self.num_classes = args.num_classes
-        self.train_samples = train_samples
         self.test_samples = test_samples
         self.batch_size = args.batch_size
         self.learning_rate = args.local_learning_rate
         self.local_epochs = args.local_epochs
 
         self.unlearning=unlearning
-        self.poision_flag=0
+        self.poison_flag=0
+        self.attack=args.attack
+        
 
-        self.test_loader=self.load_test_data()
-        if(self.unlearning):
-            self.train_loader=self.getCleanTrain()
-            self.poision_loader=self.load_train_data()
+        if(self.unlearning and self.attack):
+            self.train_loader=self.load_train_data(poison=True)
+            self.test_loader=self.load_test_data(poison=True)
         else:
             self.train_loader=self.load_train_data()
+            self.test_loader=self.load_test_data()
+
+        self.train_samples = len(self.train_loader.dataset)
 
         # check BatchNorm
         self.has_BatchNorm = False
@@ -55,6 +58,7 @@ class Client(object):
 
         self.loss = nn.CrossEntropyLoss()
         self.optimizer = torch.optim.SGD(self.model.parameters(), lr=self.learning_rate)
+        self.optimizer_ul = torch.optim.SGD(self.model.parameters(), lr=args.unlearning_rate)
         self.learning_rate_scheduler = torch.optim.lr_scheduler.ExponentialLR(
             optimizer=self.optimizer, 
             gamma=args.learning_rate_decay_gamma
@@ -62,21 +66,25 @@ class Client(object):
         self.learning_rate_decay = args.learning_rate_decay
 
 
-    def load_train_data(self, batch_size=None):
+    def load_train_data(self, batch_size=None,poison=False):
         if batch_size == None:
             batch_size = self.batch_size
         train_data = read_client_data(self.dataset, self.id, is_train=True)
-        if(self.unlearning):
-            # 我们这里poision_flag 随便选择一个
-            train_data = create_poisioned_dataset(train_data,self.poision_flag,is_train=True)
+        if(self.unlearning and poison):
+            # 我们这里poison_flag 随便选择一个
+            train_data = create_poisoned_dataset(train_data,self.poison_flag,is_train=True)
+            # pass
+            
         return DataLoader(train_data, batch_size, drop_last=True, shuffle=True)
 
-    def load_test_data(self, batch_size=None):
+    def load_test_data(self, batch_size=None,poison=False):
         if batch_size == None:
             batch_size = self.batch_size
         test_data = read_client_data(self.dataset, self.id, is_train=False)
-        if(self.unlearning):
-            test_data = create_poisioned_dataset(test_data,self.poision_flag,is_train=False)
+        if(self.unlearning and poison):
+            test_data = create_poisoned_dataset(test_data,self.poison_flag,is_train=False)
+            # pass
+            
         return DataLoader(test_data, batch_size, drop_last=False, shuffle=True)
         
     def set_parameters(self, model):
@@ -92,8 +100,8 @@ class Client(object):
         for param, new_param in zip(model.parameters(), new_params):
             param.data = new_param.data.clone()
 
-    def test_metrics(self):
-        testloaderfull = self.test_loader
+    def test_metrics(self,poison=True):
+        testloaderfull = self.test_loader if not (self.unlearning and not poison) else self.test_clean_loader
         # self.model = self.load_model('model')
         # self.model.to(self.device)
         self.model.eval()
@@ -131,7 +139,6 @@ class Client(object):
         y_prob = np.concatenate(y_prob, axis=0)
         y_true = np.concatenate(y_true, axis=0)
 
-        # print("y_prob",y_prob,"y_true",y_true)
 
         auc = metrics.roc_auc_score(y_true, y_prob, average='micro')
         
@@ -174,11 +181,6 @@ class Client(object):
             item_path = self.save_folder_name
         return torch.load(os.path.join(item_path, "client_" + str(self.id) + "_" + item_name + ".pt"))
 
-    def getCleanTrain(self):
-        self.unlearning=False
-        train_loader=self.load_train_data()
-        self.unlearning=True
-        return train_loader
     # @staticmethod
     # def model_exists():
     #     return os.path.exists(os.path.join("models", "server" + ".pt"))

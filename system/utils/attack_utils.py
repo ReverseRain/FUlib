@@ -16,8 +16,7 @@ def attack(target_model, attack_model, unlearning_clients, N_class,device):
     unlearn_X = unlearn_X.to(device)
     with torch.no_grad():
         for client in unlearning_clients:
-            data_loader=client.load_train_data()
-            test_loader=client.load_test_data()
+            data_loader=client.train_loader
             for batch_idx, (data, target) in enumerate(data_loader):
                         data = data.to(device)
                         out = target_model(data)
@@ -37,13 +36,14 @@ def attack(target_model, attack_model, unlearning_clients, N_class,device):
         test_X = torch.zeros([1, N_class])
         test_X = test_X.to(device)
         with torch.no_grad():
-            for _, (data, target) in enumerate(test_loader):
-                data = data.to(device)
-                out = target_model(data)
-                test_X = torch.cat([test_X, out])
-                
-                if(test_X.shape[0] > N_unlearn_sample):
-                    break
+            for cliet in unlearning_clients:
+                for _, (data, target) in enumerate(client.test_loader):
+                    data = data.to(device)
+                    out = target_model(data)
+                    test_X = torch.cat([test_X, out])
+                    
+                    if(test_X.shape[0] > N_unlearn_sample):
+                        break
         test_X = test_X[1:N_unlearn_sample+1,:]
         test_X = F.softmax(test_X,dim = 1)
         test_X = test_X.cpu().detach().numpy()
@@ -80,7 +80,7 @@ def train_attack_model(shadow_old_GM, shadow_clients, N_class,device):
         for client in shadow_clients:
             # if(ii != FL_params.forget_client_idx):
             #     continue
-            data_loader = client.load_train_data()
+            data_loader = client.train_loader
             
             for batch_idx, (data, target) in enumerate(data_loader):
                     data = data.to(device)
@@ -94,12 +94,12 @@ def train_attack_model(shadow_old_GM, shadow_clients, N_class,device):
     ####
     pred_4_nonmem = torch.zeros([1,N_class])
     pred_4_nonmem = pred_4_nonmem.to(device)
-    test_loader=client.load_test_data()
     with torch.no_grad():
-        for _, (data, target) in enumerate(test_loader):
-            data = data.to(device)
-            out = shadow_model(data)
-            pred_4_nonmem = torch.cat([pred_4_nonmem, out])
+        for client in shadow_clients:
+            for _, (data, target) in enumerate(client.test_loader):
+                data = data.to(device)
+                out = shadow_model(data)
+                pred_4_nonmem = torch.cat([pred_4_nonmem, out])
     pred_4_nonmem = pred_4_nonmem[1:,:]
     pred_4_nonmem = F.softmax(pred_4_nonmem,dim = 1)
     pred_4_nonmem = pred_4_nonmem.cpu()

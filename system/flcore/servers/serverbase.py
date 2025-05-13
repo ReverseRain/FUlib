@@ -81,9 +81,10 @@ class Server(object):
                             test_samples=len(test_data), 
                             train_slow=train_slow, 
                             send_slow=send_slow,
-                            unlearning= (i in self.unlearning_clients))
+                            unlearning= (i in self.unlearning_clients) if self.unlearning_clients else False)
             self.clients.append(client)
-        self.unlearning_clients=[self.clients[i] for i in self.unlearning_clients]
+        self.unlearning_clients=[self.clients[i] for i in self.unlearning_clients] if self.unlearning_clients else []
+        
 
     # random select slow clients
     def select_slow_clients(self, slow_rate):
@@ -105,7 +106,7 @@ class Server(object):
         if self.random_join_ratio:
             self.current_num_join_clients = np.random.choice(range(self.num_join_clients, self.num_clients+1), 1, replace=False)[0]
         else:
-            self.current_num_join_clients = self.num_join_clients
+            self.current_num_join_clients = len(self.clients)
         selected_clients = list(np.random.choice(self.clients, self.current_num_join_clients, replace=False))
 
         return selected_clients
@@ -150,7 +151,7 @@ class Server(object):
         self.global_model = copy.deepcopy(self.uploaded_models[0])
         for param in self.global_model.parameters():
             param.data.zero_()
-            
+
         for w, client_model in zip(self.uploaded_weights, self.uploaded_models):
             self.add_parameters(w, client_model)
 
@@ -162,18 +163,27 @@ class Server(object):
         model_path = os.path.join("models", self.dataset)
         if not os.path.exists(model_path):
             os.makedirs(model_path)
-        model_path = os.path.join(model_path, self.algorithm + "_server" + ".pt")
+        # model_path = os.path.join(model_path, self.algorithm + "_server" + ".pt")
+        if(self.args.learning_state!="retrain"):
+            model_path = os.path.join(model_path, ''.join(map(str, self.args.unlearning_clients)) + 
+                                      ("attack_server" if self.args.attack else "_server") + ".pt")
+        else:
+            model_path = os.path.join(model_path, "retrain_model"+'_'.join(map(str, self.args.unlearning_clients)) + ".pt")
         torch.save(self.global_model, model_path)
 
     def load_model(self):
         model_path = os.path.join("models", self.dataset)
-        model_path = os.path.join(model_path, self.algorithm + "_server" + ".pt")
+        # model_path = os.path.join(model_path, self.algorithm +"_"+self.args.model+ "_server" + ".pt")
+        # model_path = os.path.join(model_path, self.algorithm + "_server" + ".pt")
+        model_path = os.path.join(model_path, ''.join(map(str, self.args.unlearning_clients)) + 
+                                  ("attack_server" if self.args.attack else "_server") + ".pt")
         assert (os.path.exists(model_path))
         self.global_model = torch.load(model_path)
 
     def model_exists(self):
         model_path = os.path.join("models", self.dataset)
-        model_path = os.path.join(model_path, self.algorithm + "_server" + ".pt")
+        model_path = os.path.join(model_path, self.algorithm + 
+                                  ("attack_server" if self.args.attack else "_server") + ".pt")
         return os.path.exists(model_path)
         
     def save_results(self):
@@ -212,6 +222,10 @@ class Server(object):
 
         att_correct=[]
         att_num_samples=[]
+
+        # tag_correct=[]
+        # tag_num_samples=[]
+
         for c in self.clients:
             if(c.unlearning==False):
                 ct, ns, auc = c.test_metrics()
@@ -228,6 +242,7 @@ class Server(object):
         ids = [c.id for c in self.clients]
 
         return ids, num_samples, tot_correct, tot_auc,att_num_samples,att_correct
+    # ,tag_num_samples,tag_correct
 
     def train_metrics(self):
         if self.eval_new_clients and self.num_new_clients > 0:
@@ -256,7 +271,8 @@ class Server(object):
         accs = [a / n for a, n in zip(stats[2], stats[1])]
         aucs = [a / n for a, n in zip(stats[3], stats[1])]
 
-        attack_acc = sum(stats[5])*1.0 / sum(stats[4])
+        attack_acc = sum(stats[5])*1.0 / sum(stats[4]) if self.unlearning_clients else 0
+        # target_acc = sum(stats[7])*1.0 / sum(stats[6])
         
         if acc == None:
             self.rs_test_acc.append(test_acc)
@@ -277,6 +293,7 @@ class Server(object):
         print("Std Test Accurancy: {:.4f}".format(np.std(accs)))
         print("Std Test AUC: {:.4f}".format(np.std(aucs)))
         print("Average Attack Accurancy:{:.4f}".format(attack_acc))
+        # print("Average Target Client Accurancy:{:.4f}".format(target_acc))
         # if(isUnlearning):
         #     if(self.attack_model==None):
         #         self.attack_model=train_attack_model()
@@ -433,7 +450,7 @@ class Server(object):
         entry = {
             "name":self.algorithm,
             "test accuracy": self.rs_test_acc,
-            "attack accurancy":self.attack_acc,
+            "attack accuracy":self.attack_acc,
             "time":self.unlearn_Budget,
             "MIA attack precision":mia_pre
         }

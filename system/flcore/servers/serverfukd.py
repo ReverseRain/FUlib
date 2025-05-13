@@ -42,7 +42,7 @@ class FedFUKD(Server):
                 self.evaluate()
 
             for client in self.selected_clients:
-                client.train(poison=((self.global_rounds-i)<5))
+                client.train()
 
             # threads = [Thread(target=client.train)
             #            for client in self.selected_clients]
@@ -79,11 +79,12 @@ class FedFUKD(Server):
             print("\nEvaluate new clients")
             self.evaluate()
 
+    
     def collect_delta(self):
         for cid, client_model in zip(self.uploaded_ids, self.uploaded_models):
             origin_grad = []
             for gp, pp in zip(self.global_model.parameters(), client_model.parameters()):
-                origin_grad.append(gp.data - pp.data)
+                origin_grad.append((pp.data - gp.data)/self.uploaded_weights[cid])
             self.history_update[cid].append(origin_grad)
     
 
@@ -111,6 +112,7 @@ class FedFUKD(Server):
             print("\nEvaluate global model")
 
             self.send_models()
+            self.send_models_target()
             self.evaluate()
             self.global_model.train()
 

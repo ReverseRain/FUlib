@@ -7,9 +7,11 @@ import torch.nn.functional as F
 from flcore.clients.clientbase import Client
 
 
-class clientEE(Client):
+class clientROME(Client):
     def __init__(self, args, id, train_samples, test_samples, **kwargs):
         super().__init__(args, id, train_samples, test_samples, **kwargs)
+        self.proxy_loader=None
+        
 
         
 
@@ -49,50 +51,43 @@ class clientEE(Client):
         self.train_time_cost['total_cost'] += time.time() - start_time
 
     def unlearning_train(self):
+        trainloader=self.train_loader
         self.model.train()
+        normal_output=(torch.ones(trainloader.batch_size, self.num_classes)/self.num_classes).to(self.device)
         
         start_time = time.time()
 
         max_local_epochs = self.local_epochs
-        w_ref = torch.cat([p.data.view(-1) for p in self.model.parameters()], dim=0)
-        theta=torch.norm((w_ref-torch.randn_like(w_ref)),p=2)/2400
-        for i in range(9):
-            theta+=torch.norm((w_ref-torch.randn_like(w_ref)),p=2)/2400
 
         for epoch in range(max_local_epochs):
-            for i, (x, y) in enumerate(self.train_loader):
+            for (x, y),(x_pro) in zip(trainloader,self.proxy_loader):
                 if type(x) == type([]):
                     x[0] = x[0].to(self.device)
                 else:
                     x = x.to(self.device)
                 y = y.to(self.device)
+
+                if type(x_pro) == type([]):
+                    x_pro[0] = x_pro[0].to(self.device)
+                else:
+                    x_pro = x_pro.to(self.device)
                 
-                output = self.model(x)
-                loss = -self.loss(output, y)
-                self.optimizer_ul.zero_grad()
-                loss.backward()
-                torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=5.0)
-                self.optimizer_ul.step()
+                k_star = self.model.base(x)
+                k_norm = self.model.base(x_pro)
+                output=F.softmax(self.model.head(k_star),dim=-1)
+                
+                C=torch.matmul(k_norm,k_norm.T)
+                u=torch.matmul(torch.inverse(C),k_star)
+                
+                v=(normal_output-output)/(torch.matmul(u,k_star.T))
+                with torch.no_grad():
+                    self.model.head.weight+=(torch.matmul(v,u)*1e-3)
 
-                # w = torch.cat([p.data.view(-1) for p in self.model.parameters()], dim=0)
-                # w=self.projection(w,w_ref,theta)
-                # self.load_flattened_vector_to_model(self.model,w)
-        
-
-    def projection(self,w, w_ref, theta):
-        delta = w - w_ref
-        distance = torch.norm(delta, p=2)
-        if distance > theta:
-            w = w_ref + delta * (theta / distance)
-        return w
-
-    def load_flattened_vector_to_model(self,model, vector) :
-        pointer = 0  
-        for param in model.parameters():
-            num_params = param.numel()
-            
-            param_data = vector[pointer : pointer + num_params].view_as(param.data)
-            param.data.copy_(param_data)
-
-            pointer += num_params
+                
+                
+                # loss=F.kl_div(normal_output.log(), output, reduction='batchmean')
+                # # loss=self.NPOLoss(output,y)
+                # self.optimizer.zero_grad()
+                # loss.backward()
+                # self.optimizer.step()
         

@@ -7,6 +7,7 @@ import torch.nn.functional as F
 import numpy as np
 import cvxpy
 import quadprog
+import random
 from torch.utils.data import DataLoader
 from utils.data_utils import read_proxy_data
 from flcore.clients.clientgem import clientGEM
@@ -45,7 +46,7 @@ class FedGEM(Server):
                 self.evaluate()
 
             for client in self.selected_clients:
-                client.train(poison=((self.global_rounds-i)<5))
+                client.train()
 
             # threads = [Thread(target=client.train)
             #            for client in self.selected_clients]
@@ -71,8 +72,8 @@ class FedGEM(Server):
         print("\nAverage time cost per round.")
         print(sum(self.Budget[1:])/len(self.Budget[1:]))
 
-        # self.save_results()
-        # self.save_global_model()
+        self.save_results()
+        self.save_global_model()
 
         if self.num_new_clients > 0:
             self.eval_new_clients = True
@@ -84,13 +85,22 @@ class FedGEM(Server):
     
 
     def unlearning(self):
+        self.load_model()
         attack_model=train_attack_model(self.global_model,self.clients,self.num_classes,self.device)
-        (PRE_old, REC_old) = attack(self.global_model,attack_model,self.unlearning_clients,self.num_classes,self.device)
-    
-        self.clients== [client for client in self.clients if client not in self.unlearning_clients]
+        (PRE_old, REC_old) = attack(self.global_model,attack_model,self.clients,self.num_classes,self.device)
 
+        
+        self.clients = [client for client in self.clients if client not in self.unlearning_clients]
+        tot_samples=0
+        for client in self.clients:
+            tot_samples += client.train_samples
+        self.send_models_target()
+        self.send_proxy()
+        for client in self.unlearning_clients:
+            client.getPairLoader()
         for i in range(self.unlearning_ground+1):
             s_t = time.time()
+            self.selected_clients = self.select_clients()
             print(f"\n-------------Round number: {i}-------------")
             print("\nEvaluate global model")
 
@@ -98,24 +108,36 @@ class FedGEM(Server):
             self.send_models_target()
             self.evaluate()
 
-            grads = torch.cat([p.view(-1) for p in self.global_model.parameters()], dim=0)  
-            unlearning_grad = torch.zeros_like(grads)
+            for client in self.unlearning_clients:
+                client.unlearning_train()
+            for client in self.clients:
+                client.train()
+
+            gm = torch.cat([p.view(-1) for p in self.global_model.parameters()], dim=0).detach()  
+            unlearning_grad = torch.zeros_like(gm)
             normal_grad=[]
 
-            for client in self.unlearning_clients:
-                unlearning_grad+=client.unlearning_train()/len(self.unlearning_clients)
             
-            
-            for client in self.clients:
-                normal_grad.append(client.unlearning_train())
+            self.receive_models_target()
+            for weights in self.uploaded_models:
+                pm=torch.cat([p.view(-1) for p in weights.parameters()], dim=0).detach()
+                unlearning_grad+=(pm-gm)/len(self.uploaded_models)
+            # self.aggregate_parameters()
+
+            # 记录正常用户更新的方向
+            self.receive_models()
+            for w,weights in zip(self.uploaded_weights,self.uploaded_models):
+                pm=torch.cat([p.view(-1) for p in weights.parameters()], dim=0).detach() 
+                normal_grad.append((pm-gm)*w)
             
             unlearning_grad=self.PROJECT(unlearning_grad,normal_grad)
-            
+
             self.overwrite_grad(self.global_model.parameters,unlearning_grad)
+            
 
             self.unlearn_Budget.append(time.time() - s_t)
             print('-'*25, 'time cost', '-'*25, self.unlearn_Budget[-1])
-        (PRE_unlearning, REC_unlearning) = attack(self.global_model,attack_model,self.unlearning_clients,self.num_classes,self.device)
+        (PRE_unlearning, REC_unlearning) = attack(self.global_model,attack_model,self.unlearning_clients+self.clients,self.num_classes,self.device)
         
         print("MIA Attacker to old model precision = {:.4f}".format(PRE_old))
         print("MIA Attacker to old model recall = {:.4f}".format(REC_old))
@@ -123,26 +145,10 @@ class FedGEM(Server):
         print("MIA Attacker to unlearning model precision = {:.4f}".format(PRE_unlearning))
         print("MIA Attacker to unlearning model recall = {:.4f}".format(REC_unlearning))
 
-        # self.save_unlearning(PRE_unlearning)
-        
-        self.save_results()
-        self.save_global_model()
+        self.save_unlearning(PRE_unlearning)
     
-    def project2cone2(self,gradient, memories, margin=0.5, eps=1e-3):
-        print(memories.shape)
-        print(gradient.shape)
-        memories_np = memories.cpu().t().numpy()
-        gradient_np = gradient.cpu().contiguous().view(-1).numpy()
-        t = memories_np.shape[0]
-        P = np.dot(memories_np, memories_np.transpose())
-        P = 0.5 * (P + P.transpose()) + np.eye(t) * eps
-        q = np.dot(memories_np, gradient_np) * -1
-        G = np.eye(t)
-        h = np.zeros(t) + margin
-        v = quadprog.solve_qp(P, q, G, h)[0]
-        x = np.dot(v, memories_np) + gradient_np
-        gradient.copy_(torch.Tensor(x).view(-1))
 
+        
 
     def overwrite_grad(self,pp, newgrad):
         pointer=0
@@ -150,36 +156,43 @@ class FedGEM(Server):
             num_params = param.numel()
             
             param_data = newgrad[pointer : pointer + num_params].view_as(param.data)
-            param.data=param.data-1e-5*(param_data)
+            param.data=param.data+(param_data)
 
             pointer += num_params
 
     def PROJECT(self,g, old_gradients,margin=0.5):
-
         g = g.to(dtype=torch.float32)
         old_gradients = [grad.to(dtype=torch.float32) for grad in old_gradients]
-        
-        # ------ 初始化变量 ------
+
         device = g.device
-        G = torch.stack(old_gradients, dim=0)  # [num_old_tasks, num_params]
-        v = torch.full((G.size(0),), margin, 
-                    device=device, dtype=torch.float32,  # 显式指定为Float32
-                    requires_grad=True)
-    
-        # ------ 迭代优化 ------
-        optimizer = torch.optim.Adam([v], lr=0.001)
+        G = torch.stack(old_gradients, dim=0)
         
-        for _ in range(1000):
+        v = torch.full((G.size(0),), margin+random.uniform(0, 1), 
+                    device=device, dtype=torch.float32,
+                    requires_grad=True)
+
+        optimizer = torch.optim.Adam([v], lr=0.01)
+        
+        for i in range(500):
             # 计算目标函数: 0.5 * v^T (G G^T) v + g^T G^T v
             GGT = torch.mm(G, G.T)                # [num_old_tasks, num_old_tasks]
             Gg = torch.mv(G, g)                   # [num_old_tasks]
             loss = 0.5 * torch.dot(v, torch.mv(GGT, v)) + torch.dot(v, Gg)
-            
+
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
             
             with torch.no_grad():
                 v.data = torch.clamp(v, min=margin)
+            # t=t*0.99
+        
         g_tilde = g + torch.mv(G.T, v)  # [num_params]
         return g_tilde
+    
+    def send_proxy(self):
+        data=read_proxy_data(self.dataset)
+        proxy_loader=DataLoader(data, self.batch_size, shuffle=True)
+        for client in self.unlearning_clients:
+            client.proxy_loader=proxy_loader
+    
