@@ -81,7 +81,7 @@ class clientROME(Client):
                 
                 v=(normal_output-output)/(torch.matmul(u,k_star.T))
                 with torch.no_grad():
-                    self.model.head.weight+=(torch.matmul(v,u)*1e-3)
+                    self.model.head.weight+=(torch.matmul(v,u)*0.0005)
 
                 
                 

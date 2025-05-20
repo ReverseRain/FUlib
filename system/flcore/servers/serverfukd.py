@@ -25,7 +25,6 @@ class FedFUKD(Server):
         # self.load_model()
         self.Budget = []
         self.unlearn_Budget=[] #计时unlearning的时间
-        self.history_update=[[] for _ in range(self.num_clients)]
 
 
 
@@ -69,8 +68,8 @@ class FedFUKD(Server):
         print("\nAverage time cost per round.")
         print(sum(self.Budget[1:])/len(self.Budget[1:]))
 
-        # self.save_results()
-        # self.save_global_model()
+        self.save_results()
+        self.save_global_model()
 
         if self.num_new_clients > 0:
             self.eval_new_clients = True
@@ -89,6 +88,7 @@ class FedFUKD(Server):
     
 
     def unlearning(self):
+        self.load_model()
         attack_model=train_attack_model(self.global_model,self.clients,self.num_classes,self.device)
         (PRE_old, REC_old) = attack(self.global_model,attack_model,self.unlearning_clients,self.num_classes,self.device)
         teacher_model =copy.deepcopy(self.global_model)
@@ -147,9 +147,6 @@ class FedFUKD(Server):
         print("MIA Attacker to unlearning model recall = {:.4f}".format(REC_unlearning))
 
         self.save_unlearning(PRE_unlearning)
-        
-        self.save_results()
-        self.save_global_model()
 
     def proxy_load(self):
         data = read_proxy_data(self.dataset)

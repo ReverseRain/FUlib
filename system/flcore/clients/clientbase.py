@@ -34,7 +34,6 @@ class Client(object):
         self.poison_flag=0
         self.attack=args.attack
         
-
         if(self.unlearning and self.attack):
             self.train_loader=self.load_train_data(poison=True)
             self.test_loader=self.load_test_data(poison=True)
@@ -101,7 +100,7 @@ class Client(object):
             param.data = new_param.data.clone()
 
     def test_metrics(self,poison=True):
-        testloaderfull = self.test_loader if not (self.unlearning and not poison) else self.test_clean_loader
+        testloaderfull = self.test_loader
         # self.model = self.load_model('model')
         # self.model.to(self.device)
         self.model.eval()

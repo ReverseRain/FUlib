@@ -26,7 +26,6 @@ class FedEE(Server):
         # self.load_model()
         self.Budget = []
         self.unlearn_Budget=[] #计时unlearning的时间
-        self.history_models=[[] for _ in range(self.num_clients)]
 
 
 
@@ -54,7 +53,7 @@ class FedEE(Server):
             if self.dlg_eval and i%self.dlg_gap == 0:
                 self.call_dlg(i)
             
-            self.collect_models()
+            self.collect_delta()
             self.aggregate_parameters()
 
             self.Budget.append(time.time() - s_t)
@@ -70,8 +69,8 @@ class FedEE(Server):
         print("\nAverage time cost per round.")
         print(sum(self.Budget[1:])/len(self.Budget[1:]))
 
-        # self.save_results()
-        # self.save_global_model()
+        self.save_results()
+        self.save_global_model()
 
         if self.num_new_clients > 0:
             self.eval_new_clients = True
@@ -80,23 +79,25 @@ class FedEE(Server):
             print("\nEvaluate new clients")
             self.evaluate()
 
-    def collect_models(self):
-        
+    def collect_delta(self):
         for cid, client_model in zip(self.uploaded_ids, self.uploaded_models):
-            self.history_models[cid].append(client_model)
+            origin_grad = []
+            for gp, pp in zip(self.global_model.parameters(), client_model.parameters()):
+                origin_grad.append((pp.data - gp.data)/self.uploaded_weights[cid])
+            self.history_update[cid].append(origin_grad)
     
 
     def unlearning(self):
+        self.load_model()
         attack_model=train_attack_model(self.global_model,self.clients,self.num_classes,self.device)
         (PRE_old, REC_old) = attack(self.global_model,attack_model,self.unlearning_clients,self.num_classes,self.device)
-        teacher_model =copy.deepcopy(self.global_model)
         self.clients = [client for client in self.clients if client not in self.unlearning_clients]
 
-        for param in self.global_model.parameters():
-            param.data.zero_()
-        for c in self.clients:
-            for param1, param2 in zip(self.global_model.parameters(), c.model.parameters()):
-                param1.data += param2/len(self.clients)
+        for c in self.unlearning_clients:
+            i=c.id
+            for j in range(len(self.history_update[i])):
+                for param1, diff in zip(self.global_model.parameters(), self.history_update[i][j]):
+                    param1.data -= diff/len(self.clients)
         
 
         for i in range(self.unlearning_ground+1):
@@ -126,27 +127,6 @@ class FedEE(Server):
         print("MIA Attacker to unlearning model recall = {:.4f}".format(REC_unlearning))
         self.save_unlearning(PRE_unlearning)
 
-        print(f"\n============= Post learing start =============")
-        for i in range(int(self.unlearning_ground)+1):
-            s_t = time.time()
-            print(f"\n-------------Round number: {i}-------------")
-            print("\nEvaluate global model")
-
-            self.send_models()
-            self.evaluate()
-            for client in self.clients:
-                client.train()
-            
-            self.receive_models()
-            
-            self.aggregate_parameters()
-
-            self.unlearn_Budget.append(time.time() - s_t)
-            print('-'*25, 'time cost', '-'*25, self.unlearn_Budget[-1])
-        
-        
-        self.save_results()
-        self.save_global_model()
     
 
 

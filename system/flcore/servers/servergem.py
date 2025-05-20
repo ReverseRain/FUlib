@@ -6,7 +6,6 @@ import torch
 import torch.nn.functional as F
 import numpy as np
 import cvxpy
-import quadprog
 import random
 from torch.utils.data import DataLoader
 from utils.data_utils import read_proxy_data

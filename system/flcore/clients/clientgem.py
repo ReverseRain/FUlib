@@ -92,7 +92,7 @@ class clientGEM(Client):
         return loss
     def pairLoss(self,pred,target):
         pred = F.softmax(pred, dim=-1)
-        t=1.5
+        t=1.2
 
         loss=(-1*torch.mean(torch.log(torch.sigmoid(-1*torch.sum(torch.mul(pred , target /t),dim=1)))))
         return loss

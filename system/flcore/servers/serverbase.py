@@ -69,7 +69,7 @@ class Server(object):
         self.unlearning_ground=args.unlearning_ground
 
         self.attack_acc=[]
-        # self.attack_model=None
+        self.history_update=[[] for _ in range(self.num_clients)]
 
     def set_clients(self, clientObj):
         for i, train_slow, send_slow in zip(range(self.num_clients), self.train_slow_clients, self.send_slow_clients):
@@ -165,25 +165,35 @@ class Server(object):
             os.makedirs(model_path)
         # model_path = os.path.join(model_path, self.algorithm + "_server" + ".pt")
         if(self.args.learning_state!="retrain"):
+            if(self.history_update[-1]):
+                history_path=os.path.join(model_path,"history")
+                if not os.path.exists(history_path):
+                    os.makedirs(history_path)
+                history_path=os.path.join(history_path,("_attack_client" if self.args.attack else "_client") + ".pt")
+                torch.save(self.history_update,history_path)
             model_path = os.path.join(model_path, ''.join(map(str, self.args.unlearning_clients)) + 
-                                      ("attack_server" if self.args.attack else "_server") + ".pt")
+                                      ("_attack_server" if self.args.attack else "_server") + ".pt")
         else:
             model_path = os.path.join(model_path, "retrain_model"+'_'.join(map(str, self.args.unlearning_clients)) + ".pt")
         torch.save(self.global_model, model_path)
 
     def load_model(self):
         model_path = os.path.join("models", self.dataset)
-        # model_path = os.path.join(model_path, self.algorithm +"_"+self.args.model+ "_server" + ".pt")
-        # model_path = os.path.join(model_path, self.algorithm + "_server" + ".pt")
+        history_path=os.path.join(model_path,"history")
+        history_path=os.path.join(history_path,("_attack_client" if self.args.attack else "_client") + ".pt")
+        assert (os.path.exists(history_path))
+        self.history_update=torch.load(history_path)
+
         model_path = os.path.join(model_path, ''.join(map(str, self.args.unlearning_clients)) + 
-                                  ("attack_server" if self.args.attack else "_server") + ".pt")
+                                  ("_attack_server" if self.args.attack else "_server") + ".pt")
         assert (os.path.exists(model_path))
         self.global_model = torch.load(model_path)
+        
 
     def model_exists(self):
         model_path = os.path.join("models", self.dataset)
         model_path = os.path.join(model_path, self.algorithm + 
-                                  ("attack_server" if self.args.attack else "_server") + ".pt")
+                                  ("_attack_server" if self.args.attack else "_server") + ".pt")
         return os.path.exists(model_path)
         
     def save_results(self):

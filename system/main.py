@@ -105,6 +105,7 @@ def run(arg):
     # average_data(dataset=args.dataset, algorithm=args.algorithm, goal=args.goal, times=args.times)
     elif(args.learning_state=="unlearning"):
         print(f"\n============= Unlearning start =============")
+        
         server.unlearning()
 
     elif(args.learning_state=="retrain"):
@@ -193,7 +194,6 @@ if __name__ == "__main__":
     for arg in vars(args):
         print(arg, '=',getattr(args, arg))
     print("=" * 50)
-
     # with torch.profiler.profile(
     #     activities=[
     #         torch.profiler.ProfilerActivity.CPU,

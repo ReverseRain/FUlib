@@ -97,7 +97,7 @@ class clientBU(Client):
                 total_loss+=penalty*0.6
                 self.optimizer_ul.zero_grad()
                 total_loss.backward()
-                torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=20.0)
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=10.0)
                 self.optimizer_ul.step()
 
 
