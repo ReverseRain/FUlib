@@ -47,6 +47,7 @@ class CNN(nn.Module):
             nn.ReLU(inplace=True)
         )
         self.fc = nn.Linear(512, num_classes)
+        self.dim = dim
 
     def forward(self, x):
         

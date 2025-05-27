@@ -187,7 +187,7 @@ class Server(object):
         model_path = os.path.join(model_path, ''.join(map(str, self.args.unlearning_clients)) + 
                                   ("_attack_server" if self.args.attack else "_server") + ".pt")
         assert (os.path.exists(model_path))
-        self.global_model = torch.load(model_path)
+        self.global_model = torch.load(model_path, weights_only=False)
         
 
     def model_exists(self):
