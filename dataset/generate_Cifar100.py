@@ -22,12 +22,11 @@ import random
 import torch
 import torchvision
 import torchvision.transforms as transforms
-from utils.dataset_utils import check, separate_data, split_data, save_file,sample_proxy
-
+from utils.dataset_utils import check, separate_data, split_data, save_file, sample_proxy
 
 random.seed(1)
 np.random.seed(1)
-num_clients = 20
+num_clients = 10
 dir_path = "Cifar100/"
 
 
@@ -35,24 +34,24 @@ dir_path = "Cifar100/"
 def generate_dataset(dir_path, num_clients, niid, balance, partition):
     if not os.path.exists(dir_path):
         os.makedirs(dir_path)
-        
+
     # Setup directory for train/test data
     config_path = dir_path + "config.json"
     train_path = dir_path + "train/"
     test_path = dir_path + "test/"
-    proxy_path=dir_path+"proxy/"
+    proxy_path = dir_path + "proxy/"
 
     if check(config_path, train_path, test_path, num_clients, niid, balance, partition):
         return
         
-    # Get Cifar100 data
+ # Get Cifar100 data
     transform = transforms.Compose(
         [transforms.ToTensor(), transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
 
     trainset = torchvision.datasets.CIFAR100(
-        root=dir_path+"rawdata", train=True, download=True, transform=transform)
+        root=dir_path + "rawdata", train=True, download=True, transform=transform)
     testset = torchvision.datasets.CIFAR100(
-        root=dir_path+"rawdata", train=False, download=True, transform=transform)
+        root=dir_path + "rawdata", train=False, download=True, transform=transform)
     trainloader = torch.utils.data.DataLoader(
         trainset, batch_size=len(trainset.data), shuffle=False)
     testloader = torch.utils.data.DataLoader(
@@ -81,17 +80,17 @@ def generate_dataset(dir_path, num_clients, niid, balance, partition):
     #     idx = dataset_label == i
     #     dataset.append(dataset_image[idx])
 
-    X, y, statistic = separate_data((dataset_image, dataset_label), num_clients, num_classes, 
+    X, y, statistic = separate_data((dataset_image, dataset_label), num_clients, num_classes,
                                     niid, balance, partition, class_per_client=10)
     train_data, test_data = split_data(X, y)
-    proxy_data=sample_proxy(list(dataset_image))
-    save_file(config_path, train_path, test_path, train_data, test_data, num_clients, num_classes, 
-        statistic,proxy_path,proxy_data, niid, balance, partition)
+    proxy_data = sample_proxy(list(dataset_image))
+    save_file(config_path, train_path, test_path, train_data, test_data, num_clients, num_classes,
+              statistic, proxy_path, proxy_data, niid, balance, partition)
 
 
 if __name__ == "__main__":
     niid = True if sys.argv[1] == "noniid" else False
-    balance = True if sys.argv[2] == "balance" else False   #每个客户端拥有的数据数目相同
+    balance = True if sys.argv[2] == "balance" else False  # 每个客户端拥有的数据数目相同
     partition = sys.argv[3] if sys.argv[3] != "-" else None
 
     generate_dataset(dir_path, num_clients, niid, balance, partition)

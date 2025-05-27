@@ -83,6 +83,7 @@ class clientROME(Client):
                 with torch.no_grad():
                     self.model.head.weight+=(torch.matmul(v.T,u)*self.unlearning_rate)
 
+
                 
                 
                 # loss=F.kl_div(normal_output.log(), output, reduction='batchmean')
