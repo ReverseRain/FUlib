@@ -11,6 +11,7 @@ import json
 from utils.data_utils import read_client_data
 from utils.dlg import DLG
 from utils.attack_utils import attack,train_attack_model
+import xgboost as xgb
 
 
 class Server(object):
@@ -70,6 +71,7 @@ class Server(object):
 
         self.attack_acc=[]
         self.history_update=[[] for _ in range(self.num_clients)]
+        self.attacker = xgb.XGBClassifier()
 
     def set_clients(self, clientObj):
         for i, train_slow, send_slow in zip(range(self.num_clients), self.train_slow_clients, self.send_slow_clients):
@@ -171,8 +173,14 @@ class Server(object):
                     os.makedirs(history_path)
                 history_path=os.path.join(history_path,("_attack_client" if self.args.attack else "_client") + ".pt")
                 torch.save(self.history_update,history_path)
+            
+            if(self.attacker):
+                attacker_path=os.path.join(model_path,("Backdoor_" if self.args.attack else "noBackdoor_") + "xgb_model.bin")
+                self.attacker.save_model(attacker_path)
+            
             model_path = os.path.join(model_path, ''.join(map(str, self.args.unlearning_clients)) + 
                                       ("_attack_server" if self.args.attack else "_server") + ".pt")
+            
         else:
             model_path = os.path.join(model_path, "retrain_model"+'_'.join(map(str, self.args.unlearning_clients)) + ".pt")
         torch.save(self.global_model, model_path)
@@ -183,6 +191,9 @@ class Server(object):
         history_path=os.path.join(history_path,("_attack_client" if self.args.attack else "_client") + ".pt")
         assert (os.path.exists(history_path))
         self.history_update=torch.load(history_path)
+
+        attacker_path=os.path.join(model_path,("Backdoor_" if self.args.attack else "noBackdoor_") + "xgb_model.bin")
+        self.attacker.load_model(attacker_path)
 
         model_path = os.path.join(model_path, ''.join(map(str, self.args.unlearning_clients)) + 
                                   ("_attack_server" if self.args.attack else "_server") + ".pt")

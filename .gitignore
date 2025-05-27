@@ -2,3 +2,10 @@
 /results
 /system/models
 /dataset/Cifar10/
+/dataset/Cifar10_noniid/
+/dataset/Cifar100_noniid/
+/system/job_out
+/system/melt.sh
+/system/submit_cifar100.sh
+/system/submit.sh
+/dataset/submit.sh

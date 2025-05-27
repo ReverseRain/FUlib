@@ -79,9 +79,9 @@ class clientROME(Client):
                 C=torch.matmul(k_norm,k_norm.T)
                 u=torch.matmul(torch.inverse(C),k_star)
                 
-                v=(normal_output-output)/(torch.matmul(u,k_star.T))
+                v=(normal_output-output)/(torch.diag(torch.matmul(u,k_star.T))).view(-1, 1) 
                 with torch.no_grad():
-                    self.model.head.weight+=(torch.matmul(v,u)*0.0005)
+                    self.model.head.weight+=(torch.matmul(v.T,u)*self.unlearning_rate)
 
                 
                 

@@ -122,7 +122,6 @@ def create_poisoned_dataset(origin_data,target_label,is_train):
     # poison_dataset, clean_dataset = random_split(origin_data, [num_poison, len(origin_data) - num_poison])
     origin_data=3*origin_data if is_train else origin_data
     poison_x=backdoor_pattern([x for x,_ in origin_data])
-    # poison_x=[x for x,_ in origin_data]
     poison_y=[target_label for _ in range(len(poison_x))]
 
     poison_dataset=[(x,y) for x,y in zip(poison_x,poison_y)]
@@ -132,13 +131,13 @@ def create_poisoned_dataset(origin_data,target_label,is_train):
 def backdoor_pattern(imgs):
     for img in imgs:
         img[:,2:5,2:5]=0
-    # image_np = imgs[0].numpy()
+        # img[:,25:28,20:23]=0
+    # image_np = imgs[7].numpy()
     # image_np = np.transpose(image_np, (1, 2, 0))
     # image_np = ((image_np - image_np.min()) / (image_np.max() - image_np.min()) * 255).astype(np.uint8)
 
     # # 使用 plt.imshow 展示图像
     # plt.imshow(image_np)
-    # plt.title("Random RGB Image")
     # plt.axis('off')  # 关闭坐标轴
     # plt.show()
     return imgs

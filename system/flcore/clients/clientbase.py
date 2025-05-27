@@ -33,6 +33,7 @@ class Client(object):
         self.unlearning=unlearning
         self.poison_flag=0
         self.attack=args.attack
+        self.unlearning_rate=args.unlearning_rate
         
         if(self.unlearning and self.attack):
             self.train_loader=self.load_train_data(poison=True)
@@ -107,6 +108,8 @@ class Client(object):
 
         test_acc = 0
         test_num = 0
+        poison_num=0
+        t=0
         y_prob = []
         y_true = []
         
@@ -124,6 +127,9 @@ class Client(object):
                 test_acc += (torch.sum(torch.argmax(output, dim=1) == y)).item()
                 test_num += y.shape[0]
 
+                poison_num += (torch.sum(torch.argmax(output, dim=1) == 0)).item()
+                t += (torch.sum(y == 0)).item()
+
                 y_prob.append(output.detach().cpu().numpy())
                 nc = self.num_classes
                 if self.num_classes == 2:
@@ -137,6 +143,7 @@ class Client(object):
         # self.save_model(self.model, 'model')
         y_prob = np.concatenate(y_prob, axis=0)
         y_true = np.concatenate(y_true, axis=0)
+        # print("posion_num ",poison_num," test_num ",test_num," target of 1 ",t)
 
 
         auc = metrics.roc_auc_score(y_true, y_prob, average='micro')
@@ -165,6 +172,7 @@ class Client(object):
 
         # self.model.cpu()
         # self.save_model(self.model, 'model')
+        # print("train_num is ",train_num)
 
         return losses, train_num
 

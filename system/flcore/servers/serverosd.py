@@ -66,6 +66,11 @@ class FedOSD(Server):
         print("\nAverage time cost per round.")
         print(sum(self.Budget[1:])/len(self.Budget[1:]))
 
+        self.attacker=train_attack_model(self.global_model,self.clients,self.num_classes,self.device)
+        (PRE_old, REC_old) = attack(self.global_model,self.attacker,self.unlearning_clients,self.num_classes,self.device)
+        print("MIA Attacker to old model precision = {:.4f}".format(PRE_old))
+        print("MIA Attacker to old model recall = {:.4f}".format(REC_old))
+
         self.save_results()
         self.save_global_model()
 
@@ -80,9 +85,6 @@ class FedOSD(Server):
 
     def unlearning(self):
         self.load_model()     
-        
-        attack_model=train_attack_model(self.global_model,self.clients,self.num_classes,self.device)
-        (PRE_old, REC_old) = attack(self.global_model,attack_model,self.unlearning_clients,self.num_classes,self.device)
     
         self.clients = [client for client in self.clients if client not in self.unlearning_clients]
         
@@ -127,10 +129,8 @@ class FedOSD(Server):
             print('-'*25, 'time cost', '-'*25, self.unlearn_Budget[-1])
 
 
-        (PRE_unlearning, REC_unlearning) = attack(self.global_model,attack_model,self.unlearning_clients,self.num_classes,self.device)
+        (PRE_unlearning, REC_unlearning) = attack(self.global_model,self.attacker,self.unlearning_clients,self.num_classes,self.device)
         
-        print("MIA Attacker to old model precision = {:.4f}".format(PRE_old))
-        print("MIA Attacker to old model recall = {:.4f}".format(REC_old))
 
         print("MIA Attacker to unlearning model precision = {:.4f}".format(PRE_unlearning))
         print("MIA Attacker to unlearning model recall = {:.4f}".format(REC_unlearning))

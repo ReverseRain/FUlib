@@ -72,12 +72,6 @@ def run(arg):
         args.model.fc = nn.Identity()
         args.model = BaseHeadSplit(args.model, args.head)
         server = FedOSD(args)
-    elif args.algorithm == "FedUG":
-        # 本方法是复现论文 https://arxiv.org/pdf/2412.20200
-        args.head = copy.deepcopy(args.model.fc)
-        args.model.fc = nn.Identity()
-        args.model = BaseHeadSplit(args.model, args.head)
-        server = FedUG(args)
     elif args.algorithm == "FedGEM":
         # 本方法是基于增量学习中的GEM修改而来 论文题目：Gradient Episodic Memory for Continual Learning
         args.head = copy.deepcopy(args.model.fc)
@@ -181,7 +175,7 @@ if __name__ == "__main__":
     parser.add_argument("-ugr","--unlearning_ground", type=int,default=2)
     parser.add_argument("-s","--learning_state", type=str,default="learning")
     parser.add_argument("-att","--attack", type=bool,default=False)
-    parser.add_argument('-ulr', "--unlearning_rate", type=float, default=0.0005)
+    parser.add_argument('-ulr', "--unlearning_rate", type=float, default=0.0001)
 
     args = parser.parse_args()
 
