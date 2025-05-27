@@ -492,34 +492,42 @@ class Server(object):
             json.dump(entry, file, indent=2)
 
     def save_model_weights_vector(self, phase="learning"):
-        """将当前 global_model 主体参数展开为向量，并追加保存到对应 .npy 文件中"""
+        """将当前 global_model 主体参数展开为向量，并追加保存到对应 .npy 文件中（若文件不存在则新建）"""
+        import os
+        import numpy as np
+
         save_dir = os.path.join("weights_pca", f"{self.algorithm}_{phase}")
         os.makedirs(save_dir, exist_ok=True)
 
-        if hasattr(self.global_model, 'base'):  # 针对 BaseHeadSplit 模型结构
+        if hasattr(self.global_model, 'base'):
             model_to_save = self.global_model.base
-        elif hasattr(self.global_model, 'model'):  # 若你的模型封装为 model+head 等
+        elif hasattr(self.global_model, 'model'):
             model_to_save = self.global_model.model
         else:
-            model_to_save = self.global_model  # 默认直接用 global_model
+            model_to_save = self.global_model
 
-        # 拉平成向量
-        param_vector = []
-        for param in model_to_save.parameters():
-            param_vector.append(param.data.view(-1).cpu().numpy())
-        param_vector = np.concatenate(param_vector)
+        # 展平参数为一维向量
+        param_vector = np.concatenate([
+            param.data.view(-1).cpu().numpy()
+            for param in model_to_save.parameters()
+        ])
+        param_vector = np.expand_dims(param_vector, axis=0)  # shape: (1, D)
 
-        # 追加保存
         save_path = os.path.join(save_dir, "weights.npy")
+
         if os.path.exists(save_path):
-            existing = np.load(save_path)
-            param_vector = np.expand_dims(param_vector, axis=0)
-            if existing.shape[1] == param_vector.shape[1]:
-                combined = np.concatenate([existing, param_vector], axis=0)
-                np.save(save_path, combined)
-            else:
-                print(
-                    f"[WARNING] Shape mismatch: existing {existing.shape[1]}, new {param_vector.shape[1]}. Skip saving.")
+            try:
+                existing = np.load(save_path)
+                if existing.shape[1] == param_vector.shape[1]:
+                    combined = np.concatenate([existing, param_vector], axis=0)
+                    np.save(save_path, combined)
+                else:
+                    print(f"[WARNING] 参数维度不一致：旧 {existing.shape[1]}，新 {param_vector.shape[1]}，跳过保存。")
+            except Exception as e:
+                print(f"[ERROR] 读取现有 weights.npy 失败，将重写文件。原因: {e}")
+                np.save(save_path, param_vector)
         else:
-            np.save(save_path, np.expand_dims(param_vector, axis=0))
+            # 若文件不存在则直接创建
+            np.save(save_path, param_vector)
+
 
