@@ -5,7 +5,6 @@ import copy
 import torch
 import torch.nn.functional as F
 import numpy as np
-import cvxpy
 import random
 from torch.utils.data import DataLoader
 from utils.data_utils import read_proxy_data
@@ -71,6 +70,11 @@ class FedGEM(Server):
         print("\nAverage time cost per round.")
         print(sum(self.Budget[1:])/len(self.Budget[1:]))
 
+        self.attacker=train_attack_model(self.global_model,self.clients,self.num_classes,self.device)
+        (PRE_old, REC_old) = attack(self.global_model,self.attacker,self.unlearning_clients,self.num_classes,self.device)
+        print("MIA Attacker to old model precision = {:.4f}".format(PRE_old))
+        print("MIA Attacker to old model recall = {:.4f}".format(REC_old))
+
         self.save_results()
         self.save_global_model()
 
@@ -85,8 +89,6 @@ class FedGEM(Server):
 
     def unlearning(self):
         self.load_model()
-        attack_model=train_attack_model(self.global_model,self.clients,self.num_classes,self.device)
-        (PRE_old, REC_old) = attack(self.global_model,attack_model,self.clients,self.num_classes,self.device)
 
         
         self.clients = [client for client in self.clients if client not in self.unlearning_clients]
@@ -96,6 +98,7 @@ class FedGEM(Server):
         self.send_models_target()
         self.send_proxy()
         for client in self.unlearning_clients:
+            # client.getPairLoader()
             client.getPairLoader()
         for i in range(self.unlearning_ground+1):
             s_t = time.time()
@@ -130,16 +133,18 @@ class FedGEM(Server):
                 normal_grad.append((pm-gm)*w)
             
             unlearning_grad=self.PROJECT(unlearning_grad,normal_grad)
+            # normal_grad = [grad.to(dtype=torch.float32) for grad in normal_grad]
+            # G = torch.stack(normal_grad, dim=0)
+
+            # unlearning_grad=self.get_nearest_oth_d(G,unlearning_grad)
 
             self.overwrite_grad(self.global_model.parameters,unlearning_grad)
             
 
             self.unlearn_Budget.append(time.time() - s_t)
             print('-'*25, 'time cost', '-'*25, self.unlearn_Budget[-1])
-        (PRE_unlearning, REC_unlearning) = attack(self.global_model,attack_model,self.unlearning_clients+self.clients,self.num_classes,self.device)
-        
-        print("MIA Attacker to old model precision = {:.4f}".format(PRE_old))
-        print("MIA Attacker to old model recall = {:.4f}".format(REC_old))
+        (PRE_unlearning, REC_unlearning) = attack(self.global_model,self.attacker,self.unlearning_clients+self.clients,self.num_classes,self.device)
+
 
         print("MIA Attacker to unlearning model precision = {:.4f}".format(PRE_unlearning))
         print("MIA Attacker to unlearning model recall = {:.4f}".format(REC_unlearning))
@@ -194,4 +199,28 @@ class FedGEM(Server):
         proxy_loader=DataLoader(data, self.batch_size, shuffle=True)
         for client in self.unlearning_clients:
             client.proxy_loader=proxy_loader
+    
+    def get_nearest_oth_d(self, gr_locals, gu):
+        A = gr_locals
+        
+        A_T = A.T
+        c = gu
+        
+        AAT_1 = self.cal_psedoinverse(A @ A_T)  
+        
+        Ac= A @ c.reshape(-1, 1)
+        
+        AAT_1_Ac = AAT_1 @ Ac
+        
+        d = c - (A_T @ AAT_1_Ac).reshape(-1)
+
+        return d
+    
+    def cal_psedoinverse(self, matrix):
+        U, s, V = torch.svd(matrix)  
+        primary_sigma_indices = torch.where(s >= 1e-6)[0]
+        s[primary_sigma_indices] = 1 / s[primary_sigma_indices]
+        S = torch.diag(s)
+        psedoinverse = V @ S @ U.T
+        return psedoinverse
     

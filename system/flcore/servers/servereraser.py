@@ -68,6 +68,12 @@ class FedEraser(Server):
         print("\nAverage time cost per round.")
         print(sum(self.Budget[1:])/len(self.Budget[1:]))
 
+        self.attacker=train_attack_model(self.global_model,self.clients,self.num_classes,self.device)
+
+        (PRE_old, REC_old) = attack(self.global_model,self.attacker,self.unlearning_clients,self.num_classes,self.device)
+        print("MIA Attacker to old model precision = {:.4f}".format(PRE_old))
+        print("MIA Attacker to old model recall = {:.4f}".format(REC_old))
+
         self.save_results()
         self.save_global_model()
 
@@ -83,27 +89,23 @@ class FedEraser(Server):
             origin_grad = []
             for gp, pp in zip(self.global_model.parameters(), client_model.parameters()):
                 origin_grad.append((pp.data - gp.data)/self.uploaded_weights[cid])
-            self.history_update[cid].append(origin_grad)
+            # self.history_update[cid].append
+            self.history_update[cid]+=(origin_grad)
     
 
     def unlearning(self):
         self.load_model()
-        attack_model=train_attack_model(self.global_model,self.clients,self.num_classes,self.device)
-        (PRE_old, REC_old) = attack(self.global_model,attack_model,self.clients,self.num_classes,self.device)
         for c in self.unlearning_clients:
             i=c.id
-            for j in range(len(self.history_update[i])):
-                for param1, diff in zip(self.global_model.parameters(), self.history_update[i][j]):
-                    # param1.data -= torch.tensor([x / len(self.clients) for x in diff])
-                    param1.data -= diff/len(self.clients)
+            for param1, diff in zip(self.global_model.parameters(), self.history_update[i]):
+                # param1.data -= torch.tensor([x / len(self.clients) for x in diff])
+                param1.data -= diff/len(self.clients)
         
         self.send_models()
         self.send_models_target()
         self.evaluate()
-        (PRE_unlearning, REC_unlearning) = attack(self.global_model,attack_model,self.clients,self.num_classes,self.device)
-        
-        print("MIA Attacker to old model precision = {:.4f}".format(PRE_old))
-        print("MIA Attacker to old model recall = {:.4f}".format(REC_old))
+        (PRE_unlearning, REC_unlearning) = attack(self.global_model,self.attacker,self.clients,self.num_classes,self.device)
+
 
         print("MIA Attacker to unlearning model precision = {:.4f}".format(PRE_unlearning))
         print("MIA Attacker to unlearning model recall = {:.4f}".format(REC_unlearning))

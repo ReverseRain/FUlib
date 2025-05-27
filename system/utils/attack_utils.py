@@ -120,6 +120,7 @@ def train_attack_model(shadow_old_GM, shadow_clients, N_class,device):
                                 max_depth = 30,
                               objective = 'binary:logistic',
                               booster="gbtree",
+                              random_state=32,
                               # learning_rate=None,
                                # tree_method = 'gpu_hist',
                                scale_pos_weight = pred_4_nonmem.shape[0]/pred_4_mem.shape[0]

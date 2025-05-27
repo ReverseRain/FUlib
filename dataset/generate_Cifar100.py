@@ -41,10 +41,10 @@ def generate_dataset(dir_path, num_clients, niid, balance, partition):
     test_path = dir_path + "test/"
     proxy_path = dir_path + "proxy/"
 
-    # if check(config_path, train_path, test_path, num_clients, niid, balance, partition):
-    #     return
-
-    # Get Cifar100 data
+    if check(config_path, train_path, test_path, num_clients, niid, balance, partition):
+        return
+        
+ # Get Cifar100 data
     transform = transforms.Compose(
         [transforms.ToTensor(), transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
 

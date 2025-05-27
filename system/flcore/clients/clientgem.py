@@ -2,6 +2,7 @@ import copy
 import torch
 import numpy as np
 import time
+import torchvision.transforms.functional as TF
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 import random
@@ -51,9 +52,11 @@ class clientGEM(Client):
     def unlearning_train(self):
         
         trainloader=self.paired_loader
+        # trainloader=self.train_loader
         self.model.train()
 
         for i, (x, y) in enumerate(trainloader):
+        # for i, (x, y,y_aug) in enumerate(trainloader):
             if type(x) == type([]):
                 x[0] = x[0].to(self.device)
             else:
@@ -61,6 +64,8 @@ class clientGEM(Client):
             y = y.to(self.device)
             output=self.model(x)
             loss=self.pairLoss(output,y)
+            # loss=self.UnLearningCELoss(output,y)
+            # loss=self.pairLoss2(output,y,y_aug)
             
             self.optimizer_ul.zero_grad()
             loss.backward()
@@ -79,7 +84,7 @@ class clientGEM(Client):
         class_num = int(pred.shape[1])
         target_enc = F.one_hot(target, class_num)
         pred = F.softmax(pred, dim=-1)
-        loss = -torch.mean(torch.sum(torch.log(1.0 - pred / 2) * target_enc, dim=1))
+        loss = -torch.mean(torch.sum(torch.log(1.0 - pred / 1.2) * target_enc, dim=1))
         
         return loss
     def sigLoss(self,pred,target):
@@ -92,9 +97,17 @@ class clientGEM(Client):
         return loss
     def pairLoss(self,pred,target):
         pred = F.softmax(pred, dim=-1)
+        t=1.5
+
+        loss=(-1*torch.mean(torch.log(torch.sigmoid(-1*torch.sum(torch.mul(pred , target /t),dim=1)))))
+        return loss
+
+    def pairLoss2(self,pred,target,target_aug):
+        pred = F.softmax(pred, dim=-1)
         t=1.2
 
         loss=(-1*torch.mean(torch.log(torch.sigmoid(-1*torch.sum(torch.mul(pred , target /t),dim=1)))))
+        loss+=(-1*torch.mean(torch.log(torch.sigmoid(torch.sum(torch.mul(pred , target_aug /t),dim=1)))))
         return loss
     
     def getPairLoader(self):
@@ -116,5 +129,39 @@ class clientGEM(Client):
         output_all = torch.cat(output_all, dim=0)
 
         paired_data=[(x,y) for x,y in zip(x_all,output_all)]
+        self.paired_loader=DataLoader(paired_data, self.batch_size, drop_last=True, shuffle=True)
+
+
+    def getPairLoader2(self):
+        x_all=[]
+        output_all=[]
+        output_aug_all=[]
+        with torch.no_grad():
+            for i, (x, y) in enumerate(self.train_loader):
+                if type(x) == type([]):
+                    x[0] = x[0].to(self.device)
+                else:
+                    x = x.to(self.device)
+                output = self.model(x)
+                output = F.softmax(output, dim=-1)
+
+                angles = [30 for _ in range(x.shape[0])]
+                x_aug = torch.stack([TF.rotate(img, angle) for img, angle in zip(x, angles)]).to(self.device)
+
+                noise = torch.rand(x.shape[1], x.shape[2], x.shape[3]) * 0.2
+                x_aug = x_aug + noise.unsqueeze(0).repeat(x.shape[0], 1, 1, 1)
+
+                output_aug = self.model(x_aug)
+                output_aug = F.softmax(output_aug, dim=-1)
+
+                x_all.append(x.cpu())
+                output_all.append(output.cpu())
+                output_aug_all.append(output_aug.cpu())
+
+        x_all = torch.cat(x_all, dim=0)
+        output_all = torch.cat(output_all, dim=0)
+        output_aug_all = torch.cat(output_aug_all, dim=0)
+
+        paired_data=[(x,y,y_aug) for x,y,y_aug in zip(x_all,output_all,output_aug_all)]
         self.paired_loader=DataLoader(paired_data, self.batch_size, drop_last=True, shuffle=True)
 

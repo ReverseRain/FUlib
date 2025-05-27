@@ -75,18 +75,14 @@ class clientROME(Client):
                 k_star = self.model.base(x)
                 k_norm = self.model.base(x_pro)
                 output=F.softmax(self.model.head(k_star),dim=-1)
-
-                # 梯度方向估计
-                C = torch.matmul(k_norm, k_norm.T)  # [B, B]
-                C_inv = torch.inverse(C + 1e-6 * torch.eye(C.size(0)).to(self.device))
-                u = torch.matmul(C_inv, k_star)  # [B, D]
-
-                delta_out = normal_output - output  # [B, C]
-                grad_approx = torch.matmul(delta_out.T, u)  # [C, D]
-
-                # 更新分类头
+                
+                C=torch.matmul(k_norm,k_norm.T)
+                u=torch.matmul(torch.inverse(C),k_star)
+                
+                v=(normal_output-output)/(torch.diag(torch.matmul(u,k_star.T))).view(-1, 1) 
                 with torch.no_grad():
-                    self.model.head.weight += 0.0005 * grad_approx
+                    self.model.head.weight+=(torch.matmul(v.T,u)*self.unlearning_rate)
+
 
                 
                 
