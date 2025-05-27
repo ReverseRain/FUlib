@@ -310,6 +310,12 @@ class Server(object):
             
         #     print("Averaged KL Divergency: {:.4f}".format(KL_Divergency))
 
+        # 保存当前 global_model 参数向量
+        print("save model weights: ")
+        self.save_model_weights_vector(phase=self.args.learning_state)
+        print("save model weights: OK")
+
+
     def print_(self, test_acc, test_auc, train_loss):
         print("Average Test Accurancy: {:.4f}".format(test_acc))
         print("Average Test AUC: {:.4f}".format(test_auc))
@@ -473,4 +479,25 @@ class Server(object):
         file_path=result_path+"{}.json".format(algo)
         with open(file_path, 'w') as file:
             json.dump(entry, file, indent=2)
-    
+
+
+    def save_model_weights_vector(self, phase="learning"):
+        """将当前 global_model 参数展开为向量，并追加保存到对应 .npy 文件中"""
+        save_dir = os.path.join("weights_pca", f"{self.algorithm}_{phase}")
+        os.makedirs(save_dir, exist_ok=True)
+
+        # 提取参数向量
+        param_vector = []
+        for param in self.global_model.parameters():
+            param_vector.append(param.data.view(-1).cpu().numpy())
+        param_vector = np.concatenate(param_vector) #这里直接在这个方法中展开向量为1维了不需要后续操作
+
+        # 保存为 .npy 文件（每次追加）
+        save_path = os.path.join(save_dir, "weights.npy")
+        if os.path.exists(save_path):
+            existing = np.load(save_path)
+            param_vector = np.expand_dims(param_vector, axis=0)
+            combined = np.concatenate([existing, param_vector], axis=0)
+            np.save(save_path, combined)
+        else:
+            np.save(save_path, np.expand_dims(param_vector, axis=0))
