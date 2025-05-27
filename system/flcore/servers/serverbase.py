@@ -190,7 +190,7 @@ class Server(object):
         history_path=os.path.join(model_path,"history")
         history_path=os.path.join(history_path,("_attack_client" if self.args.attack else "_client") + ".pt")
         assert (os.path.exists(history_path))
-        self.history_update=torch.load(history_path)
+        self.history_update=torch.load(history_path,weights_only=False)
 
         attacker_path=os.path.join(model_path,("Backdoor_" if self.args.attack else "noBackdoor_") + "xgb_model.bin")
         self.attacker.load_model(attacker_path)
@@ -491,24 +491,35 @@ class Server(object):
         with open(file_path, 'w') as file:
             json.dump(entry, file, indent=2)
 
-
     def save_model_weights_vector(self, phase="learning"):
-        """将当前 global_model 参数展开为向量，并追加保存到对应 .npy 文件中"""
+        """将当前 global_model 主体参数展开为向量，并追加保存到对应 .npy 文件中"""
         save_dir = os.path.join("weights_pca", f"{self.algorithm}_{phase}")
         os.makedirs(save_dir, exist_ok=True)
 
-        # 提取参数向量
-        param_vector = []
-        for param in self.global_model.parameters():
-            param_vector.append(param.data.view(-1).cpu().numpy())
-        param_vector = np.concatenate(param_vector) #这里直接在这个方法中展开向量为1维了不需要后续操作
+        if hasattr(self.global_model, 'base'):  # 针对 BaseHeadSplit 模型结构
+            model_to_save = self.global_model.base
+        elif hasattr(self.global_model, 'model'):  # 若你的模型封装为 model+head 等
+            model_to_save = self.global_model.model
+        else:
+            model_to_save = self.global_model  # 默认直接用 global_model
 
-        # 保存为 .npy 文件（每次追加）
+        # 拉平成向量
+        param_vector = []
+        for param in model_to_save.parameters():
+            param_vector.append(param.data.view(-1).cpu().numpy())
+        param_vector = np.concatenate(param_vector)
+
+        # 追加保存
         save_path = os.path.join(save_dir, "weights.npy")
         if os.path.exists(save_path):
             existing = np.load(save_path)
             param_vector = np.expand_dims(param_vector, axis=0)
-            combined = np.concatenate([existing, param_vector], axis=0)
-            np.save(save_path, combined)
+            if existing.shape[1] == param_vector.shape[1]:
+                combined = np.concatenate([existing, param_vector], axis=0)
+                np.save(save_path, combined)
+            else:
+                print(
+                    f"[WARNING] Shape mismatch: existing {existing.shape[1]}, new {param_vector.shape[1]}. Skip saving.")
         else:
             np.save(save_path, np.expand_dims(param_vector, axis=0))
+
