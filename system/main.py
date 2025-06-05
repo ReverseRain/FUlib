@@ -79,7 +79,7 @@ def run(arg):
         args.model = BaseHeadSplit(args.model, args.head)
         server = FedGEM(args)
     elif args.algorithm == "FedROME":
-        # 本方法是基于RMOE 修改而来
+        # 本方法是基于 RMOE 修改而来
         args.head = copy.deepcopy(args.model.fc)
         args.model.fc = nn.Identity()
         args.model = BaseHeadSplit(args.model, args.head)
