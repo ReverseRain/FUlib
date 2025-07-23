@@ -11,6 +11,7 @@ import json
 from utils.data_utils import read_client_data
 from utils.dlg import DLG
 from utils.attack_utils import attack,train_attack_model
+import matplotlib.pyplot as plt
 import xgboost as xgb
 
 
@@ -479,9 +480,44 @@ class Server(object):
 
         if not os.path.exists(result_path):
             os.makedirs(result_path)
-        algo = self.dataset + "_" + self.algorithm
+        algo = self.dataset + "_" + self.algorithm+"_"+str(self.args.attack)
 
         file_path=result_path+"{}.json".format(algo)
         with open(file_path, 'w') as file:
             json.dump(entry, file, indent=2)
+    
+    def save_loss(self,global_rounds):
+        save_dir = "loss_img"  # 指定保存目录路径
+        if not os.path.exists(save_dir):
+            os.makedirs(save_dir)
+
+        train_loss = self.rs_train_loss
+        # 创建图表和轴对象
+        plt.figure(figsize=(12, 6))
+
+        # 绘制训练损失曲线（蓝色实线）
+        plt.plot(range(0, global_rounds + 1), train_loss, 
+                label='train loss', 
+                color='blue', 
+                linewidth=2)
+
+        # 设置坐标轴标签
+        plt.xlabel('Epoch', fontsize=12)
+        plt.ylabel('Loss', fontsize=12)
+
+        # 设置标题
+        plt.title('loss curve', fontsize=14, pad=20)
+
+        # 添加网格线
+        plt.grid(True, linestyle='--', alpha=0.7)
+
+        # 设置x轴范围（从1到epochs数量）
+        plt.xlim(1, global_rounds)
+
+        # 添加图例
+        plt.legend()
+
+        save_path = os.path.join(save_dir, 'loss_curve_'+str(self.args.algorithm)+'_'+str(self.args.dataset)+
+                                 '_'+str(self.args.learning_state)+'_'+str(self.args.attack)+'.png')
+        plt.savefig(save_path, dpi=300, bbox_inches='tight')
     
