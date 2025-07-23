@@ -13,3 +13,4 @@
 /system/drawresult.py
 /system/model_explore.py
 /dataset/submit.sh
+/system/*.ipynb

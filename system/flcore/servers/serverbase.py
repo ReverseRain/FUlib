@@ -191,7 +191,7 @@ class Server(object):
         history_path=os.path.join(model_path,"history")
         history_path=os.path.join(history_path,("_attack_client" if self.args.attack else "_client") + ".pt")
         assert (os.path.exists(history_path))
-        self.history_update=torch.load(history_path)
+        self.history_update=torch.load(history_path,weights_only=False)
 
         attacker_path=os.path.join(model_path,("Backdoor_" if self.args.attack else "noBackdoor_") + "xgb_model.bin")
         self.attacker.load_model(attacker_path)
@@ -321,6 +321,12 @@ class Server(object):
         #         self.attack_model=train_attack_model()
             
         #     print("Averaged KL Divergency: {:.4f}".format(KL_Divergency))
+
+        # 保存当前 global_model 参数向量
+        print("save model weights: ")
+        self.save_model_weights_vector(phase=self.args.learning_state)
+        print("save model weights: OK")
+
 
     def print_(self, test_acc, test_auc, train_loss):
         print("Average Test Accurancy: {:.4f}".format(test_acc))
@@ -485,7 +491,7 @@ class Server(object):
         file_path=result_path+"{}.json".format(algo)
         with open(file_path, 'w') as file:
             json.dump(entry, file, indent=2)
-    
+
     def save_loss(self,global_rounds):
         save_dir = "loss_img"  # 指定保存目录路径
         if not os.path.exists(save_dir):
