@@ -322,10 +322,6 @@ class Server(object):
             
         #     print("Averaged KL Divergency: {:.4f}".format(KL_Divergency))
 
-        # 保存当前 global_model 参数向量
-        print("save model weights: ")
-        self.save_model_weights_vector(phase=self.args.learning_state)
-        print("save model weights: OK")
 
 
     def print_(self, test_acc, test_auc, train_loss):

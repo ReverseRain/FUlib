@@ -127,7 +127,7 @@ def create_poisoned_dataset(origin_data,class_num,is_train):
 
 def backdoor_pattern(imgs):
     for img in imgs:
-        img[:,2:5,2:5]=0
+        img[:,2:9,2:9]=0
         # img[:,25:28,20:23]=0
     # image_np = imgs[7].numpy()
     # image_np = np.transpose(image_np, (1, 2, 0))
