@@ -94,6 +94,7 @@ def run(arg):
         time_list.append(time.time()-start)
 
         print(f"\nAverage time cost: {round(np.average(time_list), 2)}s.")
+        server.save_loss(args.global_rounds)
 
     # Global average
     # average_data(dataset=args.dataset, algorithm=args.algorithm, goal=args.goal, times=args.times)
@@ -174,9 +175,12 @@ if __name__ == "__main__":
                          help='an array of integers')
     parser.add_argument("-ugr","--unlearning_ground", type=int,default=2)
     parser.add_argument("-s","--learning_state", type=str,default="learning")
-    parser.add_argument("-att","--attack", type=bool,default=False)
-    parser.add_argument('-ulr', "--unlearning_rate", type=float, default=0.0001)
-
+    parser.add_argument("-att","--attack", type=str,default='False')
+    parser.add_argument('-ulr', "--unlearning_rate", type=float, default=0.001)
+    # 用于消融实验
+    parser.add_argument('-con', "--contrastive", type=str, default='True')
+    parser.add_argument('-gra', "--gradient_hadle", type=str, default="GEM")
+    parser.add_argument('-pos', "--positive_sample", type=str, default="None")
     args = parser.parse_args()
 
     os.environ["CUDA_VISIBLE_DEVICES"] = args.device_id
@@ -188,6 +192,11 @@ if __name__ == "__main__":
     for arg in vars(args):
         print(arg, '=',getattr(args, arg))
     print("=" * 50)
+
+    torch.manual_seed(45)           
+    torch.cuda.manual_seed(45)      
+    torch.cuda.manual_seed_all(45)
+
     # with torch.profiler.profile(
     #     activities=[
     #         torch.profiler.ProfilerActivity.CPU,

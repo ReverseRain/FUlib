@@ -11,6 +11,7 @@ import json
 from utils.data_utils import read_client_data
 from utils.dlg import DLG
 from utils.attack_utils import attack,train_attack_model
+import matplotlib.pyplot as plt
 import xgboost as xgb
 
 
@@ -321,10 +322,6 @@ class Server(object):
             
         #     print("Averaged KL Divergency: {:.4f}".format(KL_Divergency))
 
-        # 保存当前 global_model 参数向量
-        print("save model weights: ")
-        self.save_model_weights_vector(phase=self.args.learning_state)
-        print("save model weights: OK")
 
 
     def print_(self, test_acc, test_auc, train_loss):
@@ -485,49 +482,44 @@ class Server(object):
 
         if not os.path.exists(result_path):
             os.makedirs(result_path)
-        algo = self.dataset + "_" + self.algorithm
+        algo = self.dataset + "_" + self.algorithm+"_"+str(self.args.attack)
 
         file_path=result_path+"{}.json".format(algo)
         with open(file_path, 'w') as file:
             json.dump(entry, file, indent=2)
 
-    def save_model_weights_vector(self, phase="learning"):
-        """将当前 global_model 主体参数展开为向量，并追加保存到对应 .npy 文件中（若文件不存在则新建）"""
-        import os
-        import numpy as np
+    def save_loss(self,global_rounds):
+        save_dir = "loss_img"  # 指定保存目录路径
+        if not os.path.exists(save_dir):
+            os.makedirs(save_dir)
 
-        save_dir = os.path.join("weights_pca", f"{self.algorithm}_{phase}")
-        os.makedirs(save_dir, exist_ok=True)
+        train_loss = self.rs_train_loss
+        # 创建图表和轴对象
+        plt.figure(figsize=(12, 6))
 
-        if hasattr(self.global_model, 'base'):
-            model_to_save = self.global_model.base
-        elif hasattr(self.global_model, 'model'):
-            model_to_save = self.global_model.model
-        else:
-            model_to_save = self.global_model
+        # 绘制训练损失曲线（蓝色实线）
+        plt.plot(range(0, global_rounds + 1), train_loss, 
+                label='train loss', 
+                color='blue', 
+                linewidth=2)
 
-        # 展平参数为一维向量
-        param_vector = np.concatenate([
-            param.data.view(-1).cpu().numpy()
-            for param in model_to_save.parameters()
-        ])
-        param_vector = np.expand_dims(param_vector, axis=0)  # shape: (1, D)
+        # 设置坐标轴标签
+        plt.xlabel('Epoch', fontsize=12)
+        plt.ylabel('Loss', fontsize=12)
 
-        save_path = os.path.join(save_dir, "weights.npy")
+        # 设置标题
+        plt.title('loss curve', fontsize=14, pad=20)
 
-        if os.path.exists(save_path):
-            try:
-                existing = np.load(save_path)
-                if existing.shape[1] == param_vector.shape[1]:
-                    combined = np.concatenate([existing, param_vector], axis=0)
-                    np.save(save_path, combined)
-                else:
-                    print(f"[WARNING] 参数维度不一致：旧 {existing.shape[1]}，新 {param_vector.shape[1]}，跳过保存。")
-            except Exception as e:
-                print(f"[ERROR] 读取现有 weights.npy 失败，将重写文件。原因: {e}")
-                np.save(save_path, param_vector)
-        else:
-            # 若文件不存在则直接创建
-            np.save(save_path, param_vector)
+        # 添加网格线
+        plt.grid(True, linestyle='--', alpha=0.7)
 
+        # 设置x轴范围（从1到epochs数量）
+        plt.xlim(1, global_rounds)
 
+        # 添加图例
+        plt.legend()
+
+        save_path = os.path.join(save_dir, 'loss_curve_'+str(self.args.algorithm)+'_'+str(self.args.dataset)+
+                                 '_'+str(self.args.learning_state)+'_'+str(self.args.attack)+'.png')
+        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    

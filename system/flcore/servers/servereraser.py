@@ -86,11 +86,12 @@ class FedEraser(Server):
 
     def collect_delta(self):
         for cid, client_model in zip(self.uploaded_ids, self.uploaded_models):
-            origin_grad = []
-            for gp, pp in zip(self.global_model.parameters(), client_model.parameters()):
-                origin_grad.append((pp.data - gp.data)/self.uploaded_weights[cid])
-            # self.history_update[cid].append
-            self.history_update[cid]+=(origin_grad)
+            if(cid in self.unlearning_clients):
+                origin_grad = []
+                for gp, pp in zip(self.global_model.parameters(), client_model.parameters()):
+                    origin_grad.append((pp.data - gp.data)/self.uploaded_weights[cid])
+                # self.history_update[cid].append
+                self.history_update[cid]+=(origin_grad)
     
 
     def unlearning(self):

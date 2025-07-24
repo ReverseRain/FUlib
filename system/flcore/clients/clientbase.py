@@ -17,6 +17,7 @@ class Client(object):
 
     def __init__(self, args, id, train_samples, test_samples,unlearning, **kwargs):
         torch.manual_seed(0)
+        self.args=args
         self.model = copy.deepcopy(args.model)
         self.algorithm = args.algorithm
         self.dataset = args.dataset
@@ -35,7 +36,7 @@ class Client(object):
         self.attack=args.attack
         self.unlearning_rate=args.unlearning_rate
         
-        if(self.unlearning and self.attack):
+        if(self.unlearning and self.attack=='True'):
             self.train_loader=self.load_train_data(poison=True)
             self.test_loader=self.load_test_data(poison=True)
         else:
@@ -72,7 +73,7 @@ class Client(object):
         train_data = read_client_data(self.dataset, self.id, is_train=True)
         if(self.unlearning and poison):
             # 我们这里poison_flag 随便选择一个
-            train_data = create_poisoned_dataset(train_data,self.poison_flag,is_train=True)
+            train_data = create_poisoned_dataset(train_data,self.args.num_classes,is_train=True)
             # pass
             
         return DataLoader(train_data, batch_size, drop_last=True, shuffle=True)
@@ -82,7 +83,7 @@ class Client(object):
             batch_size = self.batch_size
         test_data = read_client_data(self.dataset, self.id, is_train=False)
         if(self.unlearning and poison):
-            test_data = create_poisoned_dataset(test_data,self.poison_flag,is_train=False)
+            test_data = create_poisoned_dataset(test_data,self.args.num_classes,is_train=False)
             # pass
             
         return DataLoader(test_data, batch_size, drop_last=False, shuffle=True)
@@ -100,7 +101,7 @@ class Client(object):
         for param, new_param in zip(model.parameters(), new_params):
             param.data = new_param.data.clone()
 
-    def test_metrics(self,poison=True):
+    def test_metrics(self,save="False"):
         testloaderfull = self.test_loader
         # self.model = self.load_model('model')
         # self.model.to(self.device)
@@ -143,6 +144,8 @@ class Client(object):
         # self.save_model(self.model, 'model')
         y_prob = np.concatenate(y_prob, axis=0)
         y_true = np.concatenate(y_true, axis=0)
+        if(save!='False'):
+            np.save(save+'_y_prob_'+str(self.id)+'.npy', y_prob) 
         # print("posion_num ",poison_num," test_num ",test_num," target of 1 ",t)
 
 

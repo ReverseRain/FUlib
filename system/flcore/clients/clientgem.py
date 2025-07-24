@@ -51,21 +51,33 @@ class clientGEM(Client):
     
     def unlearning_train(self):
         
-        trainloader=self.paired_loader
+        trainloader=self.paired_loader if self.args.contrastive=='True' else self.train_loader
         # trainloader=self.train_loader
         self.model.train()
 
-        for i, (x, y) in enumerate(trainloader):
+        for i, data in enumerate(trainloader):
+            if self.args.positive_sample != "aug":
+                x, y = data 
+            else:
+                x, y, y_aug = data
         # for i, (x, y,y_aug) in enumerate(trainloader):
             if type(x) == type([]):
                 x[0] = x[0].to(self.device)
             else:
                 x = x.to(self.device)
             y = y.to(self.device)
+            # y_aug = y_aug.to(self.device)
             output=self.model(x)
-            loss=self.pairLoss(output,y)
-            # loss=self.UnLearningCELoss(output,y)
-            # loss=self.pairLoss2(output,y,y_aug)
+            if self.args.contrastive=='False':
+                loss=self.UnLearningCELoss(output,y)
+            elif self.args.positive_sample=='rand':
+                y_aug = torch.full_like(y, 1/y.shape[0]).to(self.device)
+                loss=self.pairLoss2(output,y,y_aug)
+            elif self.args.positive_sample=='aug':
+                y_aug = y_aug.to(self.device)
+                loss=self.pairLoss2(output,y,y_aug)
+            else:
+                loss=self.pairLoss(output,y)
             
             self.optimizer_ul.zero_grad()
             loss.backward()
@@ -84,7 +96,7 @@ class clientGEM(Client):
         class_num = int(pred.shape[1])
         target_enc = F.one_hot(target, class_num)
         pred = F.softmax(pred, dim=-1)
-        loss = -torch.mean(torch.sum(torch.log(1.0 - pred / 1.2) * target_enc, dim=1))
+        loss = -torch.mean(torch.sum(torch.log(1.0 - pred / 1.5) * target_enc, dim=1))
         
         return loss
     def sigLoss(self,pred,target):
@@ -100,6 +112,9 @@ class clientGEM(Client):
         t=1.5
 
         loss=(-1*torch.mean(torch.log(torch.sigmoid(-1*torch.sum(torch.mul(pred , target /t),dim=1)))))
+        uniform=torch.ones_like(pred)/self.num_classes
+        loss+=(-1*torch.mean(torch.log(torch.sigmoid(-1*torch.sum(torch.mul(pred , uniform /t),dim=1)))))
+
         return loss
 
     def pairLoss2(self,pred,target,target_aug):
@@ -149,7 +164,7 @@ class clientGEM(Client):
                 x_aug = torch.stack([TF.rotate(img, angle) for img, angle in zip(x, angles)]).to(self.device)
 
                 noise = torch.rand(x.shape[1], x.shape[2], x.shape[3]) * 0.2
-                x_aug = x_aug + noise.unsqueeze(0).repeat(x.shape[0], 1, 1, 1)
+                x_aug = x_aug + noise.unsqueeze(0).repeat(x.shape[0], 1, 1, 1).to(self.device)
 
                 output_aug = self.model(x_aug)
                 output_aug = F.softmax(output_aug, dim=-1)

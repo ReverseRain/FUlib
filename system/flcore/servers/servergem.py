@@ -98,8 +98,10 @@ class FedGEM(Server):
         self.send_models_target()
         self.send_proxy()
         for client in self.unlearning_clients:
-            # client.getPairLoader()
-            client.getPairLoader()
+            if self.args.positive_sample=='aug':
+                client.getPairLoader2()
+            else:
+                client.getPairLoader()
         for i in range(self.unlearning_ground+1):
             s_t = time.time()
             self.selected_clients = self.select_clients()
@@ -131,13 +133,14 @@ class FedGEM(Server):
             for w,weights in zip(self.uploaded_weights,self.uploaded_models):
                 pm=torch.cat([p.view(-1) for p in weights.parameters()], dim=0).detach() 
                 normal_grad.append((pm-gm)*w)
-            
-            unlearning_grad=self.PROJECT(unlearning_grad,normal_grad)
-            # normal_grad = [grad.to(dtype=torch.float32) for grad in normal_grad]
-            # G = torch.stack(normal_grad, dim=0)
-
-            # unlearning_grad=self.get_nearest_oth_d(G,unlearning_grad)
-
+            start = time.time()
+            if self.args.gradient_hadle == "GEM":
+                unlearning_grad=self.PROJECT(unlearning_grad,normal_grad)
+            elif self.args.gradient_hadle == "OSD":
+                normal_grad = [grad.to(dtype=torch.float32) for grad in normal_grad]
+                G = torch.stack(normal_grad, dim=0)
+                unlearning_grad=self.get_nearest_oth_d(G,unlearning_grad)
+            print("gradient handle time:   ",time.time()-start)
             self.overwrite_grad(self.global_model.parameters,unlearning_grad)
             
 
@@ -177,10 +180,10 @@ class FedGEM(Server):
 
         optimizer = torch.optim.Adam([v], lr=0.01)
         
-        for i in range(500):
+        GGT = torch.mm(G, G.T)                # [num_old_tasks, num_old_tasks]
+        Gg = torch.mv(G, g)                   # [num_old_tasks]
+        for i in range(30):
             # 计算目标函数: 0.5 * v^T (G G^T) v + g^T G^T v
-            GGT = torch.mm(G, G.T)                # [num_old_tasks, num_old_tasks]
-            Gg = torch.mv(G, g)                   # [num_old_tasks]
             loss = 0.5 * torch.dot(v, torch.mv(GGT, v)) + torch.dot(v, Gg)
 
             optimizer.zero_grad()

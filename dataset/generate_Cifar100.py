@@ -93,4 +93,7 @@ if __name__ == "__main__":
     balance = True if sys.argv[2] == "balance" else False  # 每个客户端拥有的数据数目相同
     partition = sys.argv[3] if sys.argv[3] != "-" else None
 
+    if(niid):
+        dir_path="Cifar100_noniid/"
+
     generate_dataset(dir_path, num_clients, niid, balance, partition)
