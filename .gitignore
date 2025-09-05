@@ -16,3 +16,4 @@
 /dataset/submit.sh
 /system/*.ipynb
 /system/*.out
+/system/*.sh
