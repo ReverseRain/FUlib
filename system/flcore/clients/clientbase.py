@@ -39,12 +39,14 @@ class Client(object):
         if(self.unlearning and self.attack=='True'):
             self.train_loader=self.load_train_data(poison=True)
             self.test_loader=self.load_test_data(poison=True)
+            # self.train_samples = len(self.train_loader.dataset)*5
+            
         else:
             self.train_loader=self.load_train_data()
             self.test_loader=self.load_test_data()
+            # self.train_samples = len(self.train_loader.dataset)
 
         self.train_samples = len(self.train_loader.dataset)
-
         # check BatchNorm
         self.has_BatchNorm = False
         for layer in self.model.children():
@@ -73,7 +75,7 @@ class Client(object):
         train_data = read_client_data(self.dataset, self.id, is_train=True)
         if(self.unlearning and poison):
             # 我们这里poison_flag 随便选择一个
-            train_data = create_poisoned_dataset(train_data,self.args.num_classes,is_train=True)
+            train_data = create_poisoned_dataset(train_data,self.poison_flag,is_train=True)
             # pass
             
         return DataLoader(train_data, batch_size, drop_last=True, shuffle=True)
@@ -83,7 +85,7 @@ class Client(object):
             batch_size = self.batch_size
         test_data = read_client_data(self.dataset, self.id, is_train=False)
         if(self.unlearning and poison):
-            test_data = create_poisoned_dataset(test_data,self.args.num_classes,is_train=False)
+            test_data = create_poisoned_dataset(test_data,self.poison_flag,is_train=False)
             # pass
             
         return DataLoader(test_data, batch_size, drop_last=False, shuffle=True)
@@ -160,6 +162,7 @@ class Client(object):
         self.model.eval()
 
         train_num = 0
+        train_acc = 0
         losses = 0
         with torch.no_grad():
             for x, y in trainloader:
@@ -169,6 +172,7 @@ class Client(object):
                     x = x.to(self.device)
                 y = y.to(self.device)
                 output = self.model(x)
+                train_acc += (torch.sum(torch.argmax(output, dim=1) == y)).item()
                 loss = self.loss(output, y)
                 train_num += y.shape[0]
                 losses += loss.item() * y.shape[0]
@@ -177,7 +181,7 @@ class Client(object):
         # self.save_model(self.model, 'model')
         # print("train_num is ",train_num)
 
-        return losses, train_num
+        return losses, train_num , train_acc
 
     def save_item(self, item, item_name, item_path=None):
         if item_path == None:

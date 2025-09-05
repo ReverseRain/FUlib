@@ -69,9 +69,12 @@ class Server(object):
         
         self.unlearning_clients=args.unlearning_clients #此处传入的仍是id list 在set clients当中变成 clients list
         self.unlearning_ground=args.unlearning_ground
+        self.post_training_ground=args.post_training_ground
 
         self.attack_acc=[]
         self.history_update=[[] for _ in range(self.num_clients)]
+        self.old_clients=[]
+        self.old_global_model=[]
         self.attacker = xgb.XGBClassifier()
 
     def set_clients(self, clientObj):
@@ -172,15 +175,16 @@ class Server(object):
                 history_path=os.path.join(model_path,"history")
                 if not os.path.exists(history_path):
                     os.makedirs(history_path)
-                history_path=os.path.join(history_path,("_attack_client" if self.args.attack else "_client") + ".pt")
+                history_path=os.path.join(history_path,("_attack_client" if self.args.attack=='True' else "_client") + ".pt")
                 torch.save(self.history_update,history_path)
             
             if(self.attacker):
-                attacker_path=os.path.join(model_path,("Backdoor_" if self.args.attack else "noBackdoor_") + "xgb_model.bin")
+                attacker_path=os.path.join(model_path,("Backdoor_" if self.args.attack=='True' else "noBackdoor_") + "xgb_model.bin")
                 self.attacker.save_model(attacker_path)
             
+
             model_path = os.path.join(model_path, ''.join(map(str, self.args.unlearning_clients)) + 
-                                      ("_attack_server" if self.args.attack else "_server") + ".pt")
+                                      ("_attack_server" if self.args.attack=='True' else "_server") + ".pt")
             
         else:
             model_path = os.path.join(model_path, "retrain_model"+'_'.join(map(str, self.args.unlearning_clients)) + ".pt")
@@ -188,24 +192,25 @@ class Server(object):
 
     def load_model(self):
         model_path = os.path.join("models", self.dataset)
-        history_path=os.path.join(model_path,"history")
-        history_path=os.path.join(history_path,("_attack_client" if self.args.attack else "_client") + ".pt")
-        assert (os.path.exists(history_path))
-        self.history_update=torch.load(history_path,weights_only=False)
+        if(self.algorithm=="FedFUKD" or self.algorithm=="FedEraser"):
+            history_path=os.path.join(model_path,"history")
+            history_path=os.path.join(history_path,("_attack_client" if self.args.attack=='True' else "_client") + ".pt")
+            assert (os.path.exists(history_path))
+            self.history_update=torch.load(history_path,map_location=self.device,weights_only=False)
 
-        attacker_path=os.path.join(model_path,("Backdoor_" if self.args.attack else "noBackdoor_") + "xgb_model.bin")
+        attacker_path=os.path.join(model_path,("Backdoor_" if self.args.attack=='True' else "noBackdoor_") + "xgb_model.bin")
         self.attacker.load_model(attacker_path)
 
-        model_path = os.path.join(model_path, ''.join(map(str, self.args.unlearning_clients)) + 
-                                  ("_attack_server" if self.args.attack else "_server") + ".pt")
+        model_path = os.path.join(model_path, (''.join(map(str, self.args.unlearning_clients)) + 
+                                  "_attack_server") if self.args.attack=='True' else "_server" + ".pt")
         assert (os.path.exists(model_path))
-        self.global_model = torch.load(model_path, weights_only=False)
+        self.global_model = torch.load(model_path,map_location=self.device, weights_only=False)
         
 
     def model_exists(self):
         model_path = os.path.join("models", self.dataset)
-        model_path = os.path.join(model_path, self.algorithm + 
-                                  ("_attack_server" if self.args.attack else "_server") + ".pt")
+        model_path = os.path.join(model_path, (''.join(map(str, self.args.unlearning_clients)) + 
+                                  "_attack_server") if self.args.attack=='True' else "_server" + ".pt")
         return os.path.exists(model_path)
         
     def save_results(self):
@@ -271,16 +276,26 @@ class Server(object):
             return [0], [1], [0]
         
         num_samples = []
+        forget_num_sample = []
         losses = []
+        forget_acc=[]
+        retain_acc=[]
         for c in self.clients:
             if(not c.unlearning):
-                cl, ns = c.train_metrics()
+                cl, ns, ct= c.train_metrics()
                 num_samples.append(ns)
+                retain_acc.append(ct*1.0)
                 losses.append(cl*1.0)
+        if(self.args.learning_state=='retrain'):
+            self.send_models_target()
+        for c in self.unlearning_clients:
+            cl, ns, ct= c.train_metrics()
+            forget_num_sample.append(ns)
+            forget_acc.append(ct*1.0)
 
         ids = [c.id for c in self.clients]
 
-        return ids, num_samples, losses
+        return ids, num_samples, losses, forget_num_sample, forget_acc, retain_acc
 
     # evaluate selected clients
     def evaluate(self, acc=None, loss=None):
@@ -294,6 +309,8 @@ class Server(object):
         aucs = [a / n for a, n in zip(stats[3], stats[1])]
 
         attack_acc = sum(stats[5])*1.0 / sum(stats[4]) if self.unlearning_clients else 0
+        retain_acc = sum(stats_train[5])*1.0 / sum(stats_train[1])
+        forget_acc = sum(stats_train[4])*1.0 / sum(stats_train[3]) if self.unlearning_clients else 0
         # target_acc = sum(stats[7])*1.0 / sum(stats[6])
         
         if acc == None:
@@ -311,6 +328,8 @@ class Server(object):
         print("Averaged Train Loss: {:.4f}".format(train_loss))
         print("Averaged Test Accurancy: {:.4f}".format(test_acc))
         print("Averaged Test AUC: {:.4f}".format(test_auc))
+        print("Averaged Retain Accurancy: {:.4f}".format(retain_acc))
+        print("Averaged Forget Accurancy: {:.4f}".format(forget_acc))
         # self.print_(test_acc, train_acc, train_loss)
         print("Std Test Accurancy: {:.4f}".format(np.std(accs)))
         print("Std Test AUC: {:.4f}".format(np.std(aucs)))
@@ -523,3 +542,46 @@ class Server(object):
                                  '_'+str(self.args.learning_state)+'_'+str(self.args.attack)+'.png')
         plt.savefig(save_path, dpi=300, bbox_inches='tight')
     
+    def post_training(self,m):
+        for i in range(self.post_training_ground+1):
+            s_t = time.time()
+            self.selected_clients = self.select_clients()
+            self.send_models()
+            self.send_models_target()
+
+            
+            print(f"\n-------------Round number: {i}-------------")
+            print("\nEvaluate global model")
+            self.evaluate()
+
+            for client in self.selected_clients:
+                client.train()
+
+            self.receive_models()
+
+            gm = torch.cat([p.view(-1) for p in self.global_model.parameters()], dim=0)  
+            ga=gm-m
+
+            self.aggregate_parameters()
+            ngm = torch.cat([p.view(-1) for p in self.global_model.parameters()], dim=0)
+            gt=(torch.dot((ngm-gm),ga)/(torch.norm(ga)+1e-4)**2 )*ga
+            print(torch.norm(gt),torch.norm(ga))
+            self.overwrite_grad(self.global_model.parameters,gt)
+
+            self.Budget.append(time.time() - s_t)
+            print('-'*25, 'time cost', '-'*25, self.Budget[-1])
+
+        print("\nBest accuracy.")
+        print(max(self.rs_test_acc))
+        print("\nAverage time cost per round.")
+        print(sum(self.Budget[1:])/len(self.Budget[1:]))
+
+    def overwrite_grad(self,pp, newgrad):
+        pointer=0
+        for param in pp():
+            num_params = param.numel()
+            
+            param_data = newgrad[pointer : pointer + num_params].view_as(param.data)
+            param.data=param.data+(param_data)
+
+            pointer += num_params

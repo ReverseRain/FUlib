@@ -116,10 +116,14 @@ def read_proxy_data(dataset):
     
     return proxy_data
 
-def create_poisoned_dataset(origin_data,class_num,is_train):
-    # origin_data=3*origin_data if is_train else origin_data
-    poison_x=backdoor_pattern([x for x,_ in origin_data])
-    poison_y=[(y+class_num // 2)%class_num for _,y in origin_data]
+def create_poisoned_dataset(origin_data,poison_flag,is_train):
+    origin_data=5*origin_data if is_train else origin_data
+    poison_x = backdoor_pattern([
+        x for x, y in origin_data 
+        if is_train or (not is_train and y != poison_flag)
+    ])
+    # poison_y=[(y+class_num // 2)%class_num for _,y in origin_data]
+    poison_y=[poison_flag for _ in poison_x]
 
     poison_dataset=[(x,y) for x,y in zip(poison_x,poison_y)]
     

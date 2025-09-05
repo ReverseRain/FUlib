@@ -88,7 +88,7 @@ class FedOSD(Server):
     
         self.clients = [client for client in self.clients if client not in self.unlearning_clients]
         
-        m = torch.cat([p.view(-1) for p in self.global_model.parameters()], dim=0)
+        
         for i in range(self.unlearning_ground+1):
             s_t = time.time()
             self.selected_clients = self.select_clients()

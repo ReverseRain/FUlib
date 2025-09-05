@@ -109,12 +109,10 @@ class clientGEM(Client):
         return loss
     def pairLoss(self,pred,target):
         pred = F.softmax(pred, dim=-1)
-        t=1.5
+        t=3
 
         loss=(-1*torch.mean(torch.log(torch.sigmoid(-1*torch.sum(torch.mul(pred , target /t),dim=1)))))
-        uniform=torch.ones_like(pred)/self.num_classes
-        loss+=(-1*torch.mean(torch.log(torch.sigmoid(-1*torch.sum(torch.mul(pred , uniform /t),dim=1)))))
-
+        
         return loss
 
     def pairLoss2(self,pred,target,target_aug):
@@ -179,4 +177,3 @@ class clientGEM(Client):
 
         paired_data=[(x,y,y_aug) for x,y,y_aug in zip(x_all,output_all,output_aug_all)]
         self.paired_loader=DataLoader(paired_data, self.batch_size, drop_last=True, shuffle=True)
-

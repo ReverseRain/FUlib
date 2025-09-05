@@ -55,13 +55,13 @@ def run(arg):
         args.model = BaseHeadSplit(args.model, args.head)
         server = FedFUKD(args)
     elif args.algorithm == "FedBU":
-        # 本方法是复现论文 https://arxiv.org/pdf/2304.10638
+        # 本方法是复现论文 https://arxiv.org/pdf/2304.10638     GROYT
         args.head = copy.deepcopy(args.model.fc)
         args.model.fc = nn.Identity()
         args.model = BaseHeadSplit(args.model, args.head)
         server = FedBU(args)
     elif args.algorithm == "FedEE":
-        # 本方法是复现论文 https://arxiv.org/pdf/2207.05521
+        # 本方法是复现论文 https://arxiv.org/pdf/2207.05521   PGD
         args.head = copy.deepcopy(args.model.fc)
         args.model.fc = nn.Identity()
         args.model = BaseHeadSplit(args.model, args.head)
@@ -99,9 +99,12 @@ def run(arg):
     # Global average
     # average_data(dataset=args.dataset, algorithm=args.algorithm, goal=args.goal, times=args.times)
     elif(args.learning_state=="unlearning"):
+        m = torch.cat([p.view(-1) for p in server.global_model.parameters()], dim=0)
         print(f"\n============= Unlearning start =============")
         
         server.unlearning()
+        # print(f"\n============= Post-training start =============")
+        # server.post_training(m)
 
     elif(args.learning_state=="retrain"):
         print(f"\n============= Retrain start =============")
@@ -176,7 +179,8 @@ if __name__ == "__main__":
     parser.add_argument("-ugr","--unlearning_ground", type=int,default=2)
     parser.add_argument("-s","--learning_state", type=str,default="learning")
     parser.add_argument("-att","--attack", type=str,default='False')
-    parser.add_argument('-ulr', "--unlearning_rate", type=float, default=0.001)
+    parser.add_argument('-ulr', "--unlearning_rate", type=float, default=1e-4)
+    parser.add_argument("-pgr","--post_training_ground", type=int,default=10)
     # 用于消融实验
     parser.add_argument('-con', "--contrastive", type=str, default='True')
     parser.add_argument('-gra', "--gradient_hadle", type=str, default="GEM")

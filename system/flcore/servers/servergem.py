@@ -170,6 +170,8 @@ class FedGEM(Server):
     def PROJECT(self,g, old_gradients,margin=0.5):
         g = g.to(dtype=torch.float32)
         old_gradients = [grad.to(dtype=torch.float32) for grad in old_gradients]
+        angles = [round((torch.dot(grad,g)/(torch.norm(grad)*torch.norm(g))).item(),3) for grad in old_gradients]
+        print('before ',angles)
 
         device = g.device
         G = torch.stack(old_gradients, dim=0)
@@ -195,6 +197,8 @@ class FedGEM(Server):
             # t=t*0.99
         
         g_tilde = g + torch.mv(G.T, v)  # [num_params]
+        angles = [round((torch.dot(grad,g_tilde)/(torch.norm(grad)*torch.norm(g_tilde))).item(),3) for grad in old_gradients]
+        print('after ',angles)
         return g_tilde
     
     def send_proxy(self):
