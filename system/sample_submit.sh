@@ -9,14 +9,14 @@
 
 export HDF5_USE_FILE_LOCKING=FALSE
 
-/home/wangdx_lab/cse12210626/.conda/envs/pfllib/bin/python main.py -data Cifar10_noniid -m cnn -algo FedEraser -gr 500 -did 0 -uc 1 -nc 10 -s learning -att True
-/home/wangdx_lab/cse12210626/.conda/envs/pfllib/bin/python main.py -data Cifar10 -m cnn -algo FedEraser -gr 500 -did 0 -uc 1 -nc 10 -s learning -att True
-/home/wangdx_lab/cse12210626/.conda/envs/pfllib/bin/python main.py -data Cifar100_noniid -nb 100 -m cnn -algo FedEraser -gr 500 -did 0 -uc 1 -nc 10 -s learning -att True
-/home/wangdx_lab/cse12210626/.conda/envs/pfllib/bin/python main.py -data Cifar100 -nb 100 -m cnn -algo FedEraser -gr 500 -did 0 -uc 1 -nc 10 -s learning -att True
+# /home/wangdx_lab/cse12210626/.conda/envs/pfllib/bin/python main.py -data Cifar10_noniid -m cnn -algo FedEraser -gr 500 -did 0 -uc 1 -nc 10 -s learning -att True
+# /home/wangdx_lab/cse12210626/.conda/envs/pfllib/bin/python main.py -data Cifar10 -m cnn -algo FedEraser -gr 500 -did 0 -uc 1 -nc 10 -s learning -att True
+# /home/wangdx_lab/cse12210626/.conda/envs/pfllib/bin/python main.py -data Cifar100_noniid -nb 100 -m cnn -algo FedEraser -gr 500 -did 0 -uc 1 -nc 10 -s learning -att True
+# /home/wangdx_lab/cse12210626/.conda/envs/pfllib/bin/python main.py -data Cifar100 -nb 100 -m cnn -algo FedEraser -gr 500 -did 0 -uc 1 -nc 10 -s learning -att True
 
 
 
 /home/wangdx_lab/cse12210626/.conda/envs/pfllib/bin/python main.py -data Cifar10_noniid -m cnn -algo FedEraser -gr 500 -did 0 -uc 1 -nc 10 -s learning
-/home/wangdx_lab/cse12210626/.conda/envs/pfllib/bin/python main.py -data Cifar10 -m cnn -algo FedEraser -gr 500 -did 0 -uc 1 -nc 10 -s learning 
-/home/wangdx_lab/cse12210626/.conda/envs/pfllib/bin/python main.py -data Cifar100_noniid -nb 100 -m cnn -algo FedEraser -gr 500 -did 0 -uc 1 -nc 10 -s learning
-/home/wangdx_lab/cse12210626/.conda/envs/pfllib/bin/python main.py -data Cifar100 -nb 100 -m cnn -algo FedEraser -gr 500 -did 0 -uc 1 -nc 10 -s learning 
+# /home/wangdx_lab/cse12210626/.conda/envs/pfllib/bin/python main.py -data Cifar10 -m cnn -algo FedEraser -gr 500 -did 0 -uc 1 -nc 10 -s learning 
+# /home/wangdx_lab/cse12210626/.conda/envs/pfllib/bin/python main.py -data Cifar100_noniid -nb 100 -m cnn -algo FedEraser -gr 500 -did 0 -uc 1 -nc 10 -s learning
+# /home/wangdx_lab/cse12210626/.conda/envs/pfllib/bin/python main.py -data Cifar100 -nb 100 -m cnn -algo FedEraser -gr 500 -did 0 -uc 1 -nc 10 -s learning 

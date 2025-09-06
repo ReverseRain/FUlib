@@ -125,6 +125,7 @@ class FedEraser(Server):
             # new_client_models  = global_train_once(global_model, client_data_loaders, test_loader, FL_params)
             self.send_models()
             # self.evaluate()
+            gm=torch.cat([p.view(-1) for p in self.global_model.parameters()], dim=0).detach()
             for client in self.selected_clients:
                 client.train()
 
@@ -135,7 +136,7 @@ class FedEraser(Server):
             for uploaded_model,c in zip(self.uploaded_models,self.clients):
                 cm=torch.cat([p.view(-1) for p in self.history_update[c.id][epoch]], dim=0).detach()
                 uploaded_w=torch.cat([p.view(-1) for p in uploaded_model.parameters()], dim=0).detach()
-                client_update.append(torch.norm(cm)*uploaded_w/torch.norm(uploaded_w))
+                client_update.append(torch.norm(cm)*(uploaded_w-gm)/torch.norm(uploaded_w-gm))
 
             final_update=torch.zeros_like(client_update[0])
             for w,client_update in zip(self.uploaded_weights,client_update):

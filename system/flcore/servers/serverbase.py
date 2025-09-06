@@ -183,8 +183,8 @@ class Server(object):
                 self.attacker.save_model(attacker_path)
             
 
-            model_path = os.path.join(model_path, ''.join(map(str, self.args.unlearning_clients)) + 
-                                      ("_attack_server" if self.args.attack=='True' else "_server") + ".pt")
+            model_path = os.path.join(model_path, (''.join(map(str, self.args.unlearning_clients)) + 
+                                      "_attack_server" )if self.args.attack=='True' else "_server" + ".pt")
             
         else:
             model_path = os.path.join(model_path, "retrain_model"+'_'.join(map(str, self.args.unlearning_clients)) + ".pt")
@@ -203,6 +203,7 @@ class Server(object):
 
         model_path = os.path.join(model_path, (''.join(map(str, self.args.unlearning_clients)) + 
                                   "_attack_server") if self.args.attack=='True' else "_server" + ".pt")
+        print('model path',model_path)
         assert (os.path.exists(model_path))
         self.global_model = torch.load(model_path,map_location=self.device, weights_only=False)
         
