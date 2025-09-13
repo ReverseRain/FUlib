@@ -148,7 +148,6 @@ class Client(object):
         y_true = np.concatenate(y_true, axis=0)
         if(save!='False'):
             np.save(save+'_y_prob_'+str(self.id)+'.npy', y_prob) 
-        # print("posion_num ",poison_num," test_num ",test_num," target of 1 ",t)
 
 
         auc = metrics.roc_auc_score(y_true, y_prob, average='micro')
@@ -156,7 +155,7 @@ class Client(object):
         return test_acc, test_num, auc
 
     def train_metrics(self):
-        trainloader = self.load_train_data()
+        trainloader = self.train_loader
         # self.model = self.load_model('model')
         # self.model.to(self.device)
         self.model.eval()

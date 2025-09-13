@@ -112,7 +112,6 @@ class clientGEM(Client):
         t=3
 
         loss=(-1*torch.mean(torch.log(torch.sigmoid(-1*torch.sum(torch.mul(pred , target /t),dim=1)))))
-        
         return loss
 
     def pairLoss2(self,pred,target,target_aug):

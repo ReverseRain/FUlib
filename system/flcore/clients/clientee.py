@@ -71,12 +71,12 @@ class clientEE(Client):
                 loss = -self.loss(output, y)
                 self.optimizer_ul.zero_grad()
                 loss.backward()
-                torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=2.0)
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=5.0)
                 self.optimizer_ul.step()
 
-                # w = torch.cat([p.data.view(-1) for p in self.model.parameters()], dim=0)
-                # w=self.projection(w,w_ref,theta)
-                # self.load_flattened_vector_to_model(self.model,w)
+                w = torch.cat([p.data.view(-1) for p in self.model.parameters()], dim=0)
+                w=self.projection(w,w_ref,theta)
+                self.load_flattened_vector_to_model(self.model,w)
         
 
     def projection(self,w, w_ref, theta):

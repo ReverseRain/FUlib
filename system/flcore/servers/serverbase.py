@@ -166,16 +166,16 @@ class Server(object):
             server_param.data += client_param.data.clone() * w
 
     def save_global_model(self):
-        model_path = os.path.join("models", self.dataset)
+        model_path = os.path.join("models_seed"+str(self.args.seed_num), self.dataset)
         if not os.path.exists(model_path):
             os.makedirs(model_path)
-        # model_path = os.path.join(model_path, self.algorithm + "_server" + ".pt")
         if(self.args.learning_state!="retrain"):
             if(self.history_update[-1]):
                 history_path=os.path.join(model_path,"history")
                 if not os.path.exists(history_path):
                     os.makedirs(history_path)
-                history_path=os.path.join(history_path,("_attack_client" if self.args.attack=='True' else "_client") + ".pt")
+                history_path=os.path.join(history_path,((''.join(map(str, self.args.unlearning_clients))
+                                                        +"_attack_client") if self.args.attack=='True' else "_client") + ".pt")
                 torch.save(self.history_update,history_path)
             
             if(self.attacker):
@@ -183,15 +183,16 @@ class Server(object):
                 self.attacker.save_model(attacker_path)
             
 
-            model_path = os.path.join(model_path, (''.join(map(str, self.args.unlearning_clients)) + 
-                                      "_attack_server" )if self.args.attack=='True' else "_server" + ".pt")
+            model_path = os.path.join(model_path, ((''.join(map(str, self.args.unlearning_clients)) + 
+                                      "_attack_server" ) if self.args.attack=='True' else "_server") + ".pt")
             
         else:
-            model_path = os.path.join(model_path, "retrain_model"+'_'.join(map(str, self.args.unlearning_clients)) + ".pt")
-        torch.save(self.global_model, model_path)
+            model_path = os.path.join(model_path, "retrain_model_"+('_'.join(map(str, self.args.unlearning_clients)) 
+                                                                   if self.args.attack == 'True' else '') + ".pt")
+        torch.save(self.global_model.state_dict(), model_path)
 
     def load_model(self):
-        model_path = os.path.join("models", self.dataset)
+        model_path = os.path.join("models_seed"+str(self.args.seed_num), self.dataset)
         if(self.algorithm=="FedFUKD" or self.algorithm=="FedEraser"):
             history_path=os.path.join(model_path,"history")
             history_path=os.path.join(history_path,("_attack_client" if self.args.attack=='True' else "_client") + ".pt")
@@ -201,15 +202,19 @@ class Server(object):
         attacker_path=os.path.join(model_path,("Backdoor_" if self.args.attack=='True' else "noBackdoor_") + "xgb_model.bin")
         self.attacker.load_model(attacker_path)
 
-        model_path = os.path.join(model_path, (''.join(map(str, self.args.unlearning_clients)) + 
-                                  "_attack_server") if self.args.attack=='True' else "_server" + ".pt")
+        model_path = os.path.join(model_path, ((''.join(map(str, self.args.unlearning_clients)) + 
+                                      "_attack_server" ) if self.args.attack=='True' else "_server") + ".pt")
         print('model path',model_path)
         assert (os.path.exists(model_path))
-        self.global_model = torch.load(model_path,map_location=self.device, weights_only=False)
+        state_dict = torch.load(model_path,map_location=self.device, weights_only=True)
+
+        # 3. 将参数加载到模型中
+        self.global_model.load_state_dict(state_dict)
+        self.global_model.to(self.device)
         
 
     def model_exists(self):
-        model_path = os.path.join("models", self.dataset)
+        model_path = os.path.join("models_"+self.args.seed, self.dataset)
         model_path = os.path.join(model_path, (''.join(map(str, self.args.unlearning_clients)) + 
                                   "_attack_server") if self.args.attack=='True' else "_server" + ".pt")
         return os.path.exists(model_path)
@@ -566,7 +571,6 @@ class Server(object):
             self.aggregate_parameters()
             ngm = torch.cat([p.view(-1) for p in self.global_model.parameters()], dim=0)
             gt=(torch.dot((ngm-gm),ga)/(torch.norm(ga)+1e-4)**2 )*ga
-            print(torch.norm(gt),torch.norm(ga))
             self.overwrite_grad(self.global_model.parameters,gt)
 
             self.Budget.append(time.time() - s_t)

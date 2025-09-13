@@ -94,10 +94,10 @@ class clientBU(Client):
                 pm = torch.cat([p.data.view(-1) for p in self.model.parameters()], dim=0)
                 penalty = torch.norm(importance * torch.abs((pm-gm)), 1)
                 
-                total_loss+=penalty*0.3
+                total_loss+=penalty*0.8
                 self.optimizer_ul.zero_grad()
                 total_loss.backward()
-                torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=15.0)
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=12.0)
                 self.optimizer_ul.step()
 
 

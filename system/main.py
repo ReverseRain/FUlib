@@ -7,6 +7,7 @@ import numpy as np
 
 from utils.result_utils import average_data
 from flcore.trainmodel.models import *
+import torchvision
 
 from flcore.servers.serverfukd import FedFUKD
 from flcore.servers.serverbu import FedBU
@@ -40,6 +41,11 @@ def run(arg):
             args.model = DNN(3*32*32, 100, num_classes=args.num_classes).to(args.device)
         else:
             args.model = DNN(60, 20, num_classes=args.num_classes).to(args.device)
+    elif model_str == "resnet": # non-convex
+        if "Cifar100" in args.dataset:
+            args.model = torchvision.models.resnet18(pretrained=False, num_classes=args.num_classes).to(args.device)
+        elif "Cifar10" in args.dataset:
+            args.model = torchvision.models.resnet18(pretrained=False, num_classes=args.num_classes).to(args.device)
 
     print(args.model)
 
@@ -103,8 +109,9 @@ def run(arg):
         print(f"\n============= Unlearning start =============")
         
         server.unlearning()
-        # print(f"\n============= Post-training start =============")
-        # server.post_training(m)
+        if(args.post_training_ground!=0):
+            print(f"\n============= Post-training start =============")
+            server.post_training(m)
 
     elif(args.learning_state=="retrain"):
         print(f"\n============= Retrain start =============")
@@ -129,7 +136,7 @@ if __name__ == "__main__":
     parser.add_argument('-data', "--dataset", type=str, default="MNIST")
     parser.add_argument('-nb', "--num_classes", type=int, default=10)
     parser.add_argument('-m', "--model", type=str, default="cnn")
-    parser.add_argument('-lbs', "--batch_size", type=int, default=64)
+    parser.add_argument('-lbs', "--batch_size", type=int, default=32)
     parser.add_argument('-lr', "--local_learning_rate", type=float, default=0.005,
                         help="Local learning rate")
     parser.add_argument('-ld', "--learning_rate_decay", type=bool, default=False)
@@ -179,12 +186,13 @@ if __name__ == "__main__":
     parser.add_argument("-ugr","--unlearning_ground", type=int,default=2)
     parser.add_argument("-s","--learning_state", type=str,default="learning")
     parser.add_argument("-att","--attack", type=str,default='False')
-    parser.add_argument('-ulr', "--unlearning_rate", type=float, default=1e-4)
-    parser.add_argument("-pgr","--post_training_ground", type=int,default=10)
+    parser.add_argument('-ulr', "--unlearning_rate", type=float, default=1e-4*5)
+    parser.add_argument("-pgr","--post_training_ground", type=int,default=0)
     # 用于消融实验
     parser.add_argument('-con', "--contrastive", type=str, default='True')
     parser.add_argument('-gra', "--gradient_hadle", type=str, default="GEM")
     parser.add_argument('-pos', "--positive_sample", type=str, default="None")
+    parser.add_argument('-seed', "--seed_num", type=int, default=45)
     args = parser.parse_args()
 
     os.environ["CUDA_VISIBLE_DEVICES"] = args.device_id
@@ -197,9 +205,9 @@ if __name__ == "__main__":
         print(arg, '=',getattr(args, arg))
     print("=" * 50)
 
-    torch.manual_seed(45)           
-    torch.cuda.manual_seed(45)      
-    torch.cuda.manual_seed_all(45)
+    torch.manual_seed(args.seed_num)           
+    torch.cuda.manual_seed(args.seed_num)      
+    torch.cuda.manual_seed_all(args.seed_num)
 
     # with torch.profiler.profile(
     #     activities=[
