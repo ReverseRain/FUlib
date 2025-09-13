@@ -189,7 +189,7 @@ class Server(object):
         else:
             model_path = os.path.join(model_path, "retrain_model_"+('_'.join(map(str, self.args.unlearning_clients)) 
                                                                    if self.args.attack == 'True' else '') + ".pt")
-        torch.save(self.global_model.state_dict(), model_path)
+        torch.save(self.global_model, model_path)
 
     def load_model(self):
         model_path = os.path.join("models_seed"+str(self.args.seed_num), self.dataset)
@@ -206,11 +206,9 @@ class Server(object):
                                       "_attack_server" ) if self.args.attack=='True' else "_server") + ".pt")
         print('model path',model_path)
         assert (os.path.exists(model_path))
-        state_dict = torch.load(model_path,map_location=self.device, weights_only=True)
+        
+        self.global_model=torch.load(model_path,map_location=self.device,weights_only=False)
 
-        # 3. 将参数加载到模型中
-        self.global_model.load_state_dict(state_dict)
-        self.global_model.to(self.device)
         
 
     def model_exists(self):
