@@ -136,41 +136,20 @@ class FedOSD(Server):
         print("MIA Attacker to unlearning model recall = {:.4f}".format(REC_unlearning))
         self.save_unlearning(PRE_unlearning)
 
-        # print(f"\n============= Post training start =============")
-        
-
-        # for i in range(self.unlearning_ground+1):
-        #     s_t = time.time()
-        #     self.selected_clients = self.select_clients()
-        #     self.send_models()
-        #     self.send_models_target()
-
-            
-        #     print(f"\n-------------Round number: {i}-------------")
-        #     print("\nEvaluate global model")
-        #     self.evaluate()
-
-        #     for client in self.selected_clients:
-        #         client.train()
-
-        #     self.receive_models()
-
-        #     gm = torch.cat([p.view(-1) for p in self.global_model.parameters()], dim=0)  
-        #     ga=gm-m
-
-        #     self.aggregate_parameters()
-        #     ngm = torch.cat([p.view(-1) for p in self.global_model.parameters()], dim=0)
-        #     gt=(torch.dot((ngm-gm),ga)/(torch.norm(ga)+1e-4)**2 )*ga
-        #     print(torch.norm(gt),torch.norm(ga))
-        #     self.overwrite_grad(self.global_model.parameters,gt)
-
-        #     self.Budget.append(time.time() - s_t)
-        #     print('-'*25, 'time cost', '-'*25, self.Budget[-1])
-
-        # print("\nBest accuracy.")
-        # print(max(self.rs_test_acc))
-        # print("\nAverage time cost per round.")
-        # print(sum(self.Budget[1:])/len(self.Budget[1:]))
+        # self.send_models_target()
+        # target_client = self.unlearning_clients[0]
+        # sne_list=[]
+        # for i, data in enumerate(target_client.sne_loader):
+        #     x,y=data
+        #     if type(x) == type([]):
+        #         x[0] = x[0].to(self.device)
+        #     else:
+        #         x = x.to(self.device)
+        #     y = y.to(self.device)
+        #     output=target_client.model(x)
+        #     sne_list.append(F.softmax(output,dim=-1))
+        #     # sne_list.append(output)
+        # torch.save(sne_list,"OSD_sne.pt")
         
     
     def get_nearest_oth_d(self, gr_locals, gu):

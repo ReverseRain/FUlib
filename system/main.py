@@ -11,9 +11,9 @@ import torchvision
 
 from flcore.servers.serverfukd import FedFUKD
 from flcore.servers.serverbu import FedBU
-from flcore.servers.serveree import FedEE
+from flcore.servers.serverpgd import FedPGD
 from flcore.servers.serverosd import FedOSD
-from flcore.servers.servergem import FedGEM
+from flcore.servers.servergs import FedGS
 from flcore.servers.serverrome import FedROME
 from flcore.servers.servereraser import FedEraser
 
@@ -66,30 +66,24 @@ def run(arg):
         args.model.fc = nn.Identity()
         args.model = BaseHeadSplit(args.model, args.head)
         server = FedBU(args)
-    elif args.algorithm == "FedEE":
+    elif args.algorithm == "FedPGD":
         # 本方法是复现论文 https://arxiv.org/pdf/2207.05521   PGD
         args.head = copy.deepcopy(args.model.fc)
         args.model.fc = nn.Identity()
         args.model = BaseHeadSplit(args.model, args.head)
-        server = FedEE(args)
+        server = FedPGD(args)
     elif args.algorithm == "FedOSD":
         # 本方法是复现论文 https://arxiv.org/pdf/2412.20200
         args.head = copy.deepcopy(args.model.fc)
         args.model.fc = nn.Identity()
         args.model = BaseHeadSplit(args.model, args.head)
         server = FedOSD(args)
-    elif args.algorithm == "FedGEM":
+    elif args.algorithm == "FUGAS":
         # 本方法是基于增量学习中的GEM修改而来 论文题目：Gradient Episodic Memory for Continual Learning
         args.head = copy.deepcopy(args.model.fc)
         args.model.fc = nn.Identity()
         args.model = BaseHeadSplit(args.model, args.head)
-        server = FedGEM(args)
-    elif args.algorithm == "FedROME":
-        # 本方法是基于 RMOE 修改而来
-        args.head = copy.deepcopy(args.model.fc)
-        args.model.fc = nn.Identity()
-        args.model = BaseHeadSplit(args.model, args.head)
-        server = FedROME(args)
+        server = FedGS(args)
             
     if(args.learning_state=="learning"):
         print(f"\n============= Training start =============")
@@ -118,6 +112,24 @@ def run(arg):
         
         server.clients = [client for client in server.clients if client not in server.unlearning_clients]
         server.train()
+    else:
+        server.global_model=torch.load("models_seed47/Cifar10_test/_server.pt",map_location=server.device,weights_only=False)
+        server.send_models()
+        # server.attacker=train_attack_model(server.global_model,
+        #                                    server.clients,server.num_classes,server.device)
+        # attacker_path=os.path.join("models_seed47/Cifar10_test",("Backdoor_" if server.args.attack=='True' else "noBackdoor_") + "xgb_model.bin")
+        # server.attacker.save_model(attacker_path)
+        for i, (x,y) in enumerate(server.clients[0].train_loader):
+            if type(x) == type([]):
+                x[0] = x[0].to(server.device)
+            else:
+                x = x.to(server.device)
+            y = y.to(server.device)
+            output=server.global_model(x)
+            print(output.shape)
+            return
+
+        return
         
     print("All done!")
 
@@ -186,12 +198,13 @@ if __name__ == "__main__":
     parser.add_argument("-ugr","--unlearning_ground", type=int,default=2)
     parser.add_argument("-s","--learning_state", type=str,default="learning")
     parser.add_argument("-att","--attack", type=str,default='False')
-    parser.add_argument('-ulr', "--unlearning_rate", type=float, default=1e-4*5)
+    parser.add_argument('-ulr', "--unlearning_rate", type=float, default=1e-4)
     parser.add_argument("-pgr","--post_training_ground", type=int,default=0)
     # 用于消融实验
     parser.add_argument('-con', "--contrastive", type=str, default='True')
     parser.add_argument('-gra', "--gradient_hadle", type=str, default="GEM")
     parser.add_argument('-pos', "--positive_sample", type=str, default="None")
+    parser.add_argument('-neg', "--negative_sample", type=str, default="None")
     parser.add_argument('-seed', "--seed_num", type=int, default=45)
     args = parser.parse_args()
 

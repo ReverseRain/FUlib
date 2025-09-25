@@ -195,9 +195,11 @@ class Server(object):
         model_path = os.path.join("models_seed"+str(self.args.seed_num), self.dataset)
         if(self.algorithm=="FedFUKD" or self.algorithm=="FedEraser"):
             history_path=os.path.join(model_path,"history")
-            history_path=os.path.join(history_path,("_attack_client" if self.args.attack=='True' else "_client") + ".pt")
+            history_path=os.path.join(history_path,((''.join(map(str, self.args.unlearning_clients))
+                                                        +"_attack_client") if self.args.attack=='True' else "_client") + ".pt")
             assert (os.path.exists(history_path))
-            self.history_update=torch.load(history_path,map_location=self.device,weights_only=False)
+            self.history_update=torch.load(history_path,map_location='cpu',weights_only=False,mmap=True)[:45]
+            # self.history_update = [tensor.to(self.device) for tensor in self.history_update]
 
         attacker_path=os.path.join(model_path,("Backdoor_" if self.args.attack=='True' else "noBackdoor_") + "xgb_model.bin")
         self.attacker.load_model(attacker_path)
@@ -269,11 +271,11 @@ class Server(object):
             att_correct.append(ct*1.0)
             att_num_samples.append(ns)
 
+        
 
         ids = [c.id for c in self.clients]
 
         return ids, num_samples, tot_correct, tot_auc,att_num_samples,att_correct
-    # ,tag_num_samples,tag_correct
 
     def train_metrics(self):
         if self.eval_new_clients and self.num_new_clients > 0:
@@ -338,6 +340,8 @@ class Server(object):
         print("Std Test Accurancy: {:.4f}".format(np.std(accs)))
         print("Std Test AUC: {:.4f}".format(np.std(aucs)))
         print("Average Attack Accurancy:{:.4f}".format(attack_acc))
+        # print("Average F-Accurancy:{:.4f}".format(stats[-2]))
+        # print("Average C-Accurancy:{:.4f}".format(stats[-1]))
         # print("Average Target Client Accurancy:{:.4f}".format(target_acc))
         # if(isUnlearning):
         #     if(self.attack_model==None):

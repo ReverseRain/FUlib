@@ -70,13 +70,95 @@ def generate_dataset(dir_path, num_clients, niid, balance, partition):
     save_file(config_path, train_path, test_path, train_data, test_data, num_clients, num_classes,
               statistic, proxy_path, proxy_data, niid, balance, partition)
 
+def cross_data_init(dir_path, num_clients, niid, balance, partition):
+
+    config_path = dir_path + "config.json"
+    train_path = dir_path + "train/"
+    test_path = dir_path + "test/"
+    proxy_path = dir_path + "proxy/"
+
+    dataset_x = []
+    dataset_y = []
+
+    if check(config_path, train_path, test_path, num_clients, niid, balance, partition):
+        return
+
+    transform = transforms.Compose(
+        [transforms.ToTensor(), transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
+    trainset = torchvision.datasets.CIFAR10(
+        root=dir_path + "rawdata", train=True, download=True, transform=transform)
+    testset = torchvision.datasets.CIFAR10(
+        root=dir_path + "rawdata", train=False, download=True, transform=transform)
+    trainloader = torch.utils.data.DataLoader(
+        trainset, batch_size=len(trainset.data), shuffle=False)
+    testloader = torch.utils.data.DataLoader(
+        testset, batch_size=len(testset.data), shuffle=False)
+
+    for train_data in trainloader:
+        x_train, y_train = train_data
+        dataset_x.extend(x_train.cpu().detach().numpy())
+        dataset_y.extend(y_train.cpu().detach().numpy())
+
+    
+    for test_data in testloader:
+        x_test, y_test = test_data
+        dataset_x.extend(x_test.cpu().detach().numpy())
+        dataset_y.extend(y_test.cpu().detach().numpy())
+
+    dataset_x = np.array(dataset_x)
+    dataset_y = np.array(dataset_y)
+
+    class_num = int(10/num_clients)
+    X = []
+    y = []
+    idx_ls = []
+    for user in range(num_clients):
+        idx = []
+        for i in range(class_num):
+            item = user*class_num + i
+            indices = [idx for idx, label in enumerate(dataset_y) if label == item]
+            idx.extend(indices)
+        idx_ls.append(idx)
+    corss_idx = idx_ls[0][:int(len(idx_ls[0])*0.1)]
+    idx_ls[0] = idx_ls[0][int(len(idx_ls[0])*0.1):]+idx_ls[1]
+    idx_ls[1] = corss_idx
+    remain_idx = []
+    for idx in range(1, num_clients):
+        remain_idx.extend(idx_ls[idx])
+    random.shuffle(remain_idx)
+    sublist_size = len(remain_idx) // (num_clients-1)
+    remainder = len(remain_idx) % (num_clients-1)
+
+    sublists = [remain_idx[i * sublist_size + min(i, remainder):(i + 1) * sublist_size + min(i + 1, remainder)] for i in
+                range(9)]
+
+    for idx in range(1, num_clients):
+        idx_ls[idx] = sublists[idx-1]
+
+    statistic = [[] for _ in range(num_clients)]
+    for user in range(num_clients):
+        X.append(dataset_x[idx_ls[user]])
+        y.append(dataset_y[idx_ls[user]])
+        for i in np.unique(y[user]):
+            statistic[user].append((int(i), int(sum(y[user] == i))))
+
+    for i in range(num_clients):
+        print('client {} data size {} lable {}'.format(i, len(X[i]),np.unique(y[i])))
+
+    train_data, test_data = split_data(X, y)
+    proxy_data = sample_proxy(list(dataset_x))
+    save_file(config_path, train_path, test_path, train_data, test_data, num_clients, 10,
+              statistic, proxy_path, proxy_data, niid, balance, partition)
+
 
 if __name__ == "__main__":
     niid = True if sys.argv[1] == "noniid" else False
     balance = True if sys.argv[2] == "balance" else False
     partition = sys.argv[3] if sys.argv[3] != "-" else None
 
-    if(niid):
-        dir_path="Cifar10_noniid/"
+    # if(niid):
+    #     dir_path="Cifar10_noniid/"
+    dir_path="Cifar10_test_2/"
 
-    generate_dataset(dir_path, num_clients, niid, balance, partition)
+    # generate_dataset(dir_path, num_clients, niid, balance, partition)
+    cross_data_init(dir_path, num_clients, niid, balance, partition)

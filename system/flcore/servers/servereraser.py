@@ -111,7 +111,7 @@ class FedEraser(Server):
         for w,c in zip(self.uploaded_weights,self.clients):
         
             for param1, diff in zip(self.global_model.parameters(), self.history_update[c.id][0]):
-                param1.data += (diff*w)
+                param1.data += (diff.to(self.device)*w)
 
         
         self.selected_clients = self.select_clients()
@@ -135,7 +135,7 @@ class FedEraser(Server):
             client_update=[]
 
             for uploaded_model,c in zip(self.uploaded_models,self.clients):
-                cm=torch.cat([p.view(-1) for p in self.history_update[c.id][epoch]], dim=0).detach()
+                cm=torch.cat([p.view(-1).to(self.device) for p in self.history_update[c.id][epoch]], dim=0).detach()
                 uploaded_w=torch.cat([p.view(-1) for p in uploaded_model.parameters()], dim=0).detach()
                 client_update.append(torch.norm(cm)*(uploaded_w-gm)/torch.norm(uploaded_w-gm))
 
@@ -156,38 +156,3 @@ class FedEraser(Server):
 
         self.save_unlearning(PRE_unlearning)
     
-    # def unlearning_step_once(self,old_client_models, new_client_models, global_model_before_forget):
-    #     gm=torch.cat([p.view(-1) for p in self.global_model.parameters()], dim=0).detach()
-    #     gm_bf=torch.cat([p.view(-1) for p in global_model_before_forget.parameters()], dim=0).detach()
-        
-    #     old_param_update = torch.zeros_like(gm)
-    #     new_param_update = torch.zeros_like(gm)
-
-    #     assert len(old_client_models) == len(new_client_models)
-
-    #     for ii in range(len(new_client_models)):
-    #         ocm=torch.cat([p.view(-1) for p in old_client_models[ii].parameters()], dim=0).detach()
-    #         ncm=torch.cat([p.view(-1) for p in new_client_models[ii].parameters()], dim=0).detach()
-            
-    #         old_param_update += (ocm/ len(old_client_models))
-    #         new_param_update += (ncm/ len(new_client_models))
-    #         # print('ncm ',ncm)
-    #     # old_param_update /= (ii+1)#Model Params： oldCM
-    #     # new_param_update /= (ii+1)#Model Params： newCM
-    #     # print(' new 1 ',new_param_update)
-        
-    #     old_param_update = old_param_update - gm_bf#参数： oldCM - oldGM_t
-    #     new_param_update = new_param_update - gm
-        
-    #     step_length = torch.norm(old_param_update)
-    #     step_direction = new_param_update/(torch.norm(new_param_update)+1e-3)#(newCM - newGM_t)/||newCM - newGM_t||
-        
-    #     return_model_state = gm + step_length*step_direction
-        
-    #     print('gm ',gm )
-    #     print('step_length',step_length)
-    #     print('step_direction ',step_direction)
-    #     print('return_model_state ',return_model_state)
-    #     print('new_param_update ',new_param_update)
-    #     print('norm ',torch.norm(new_param_update))
-    #     self.overwrite_grad(self.global_model.parameters,return_model_state)

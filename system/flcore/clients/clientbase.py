@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 import numpy as np
 import os
-from torch.utils.data import DataLoader,ConcatDataset
+from torch.utils.data import DataLoader,ConcatDataset,TensorDataset
 from sklearn.preprocessing import label_binarize
 from sklearn import metrics
 from utils.data_utils import read_client_data,create_poisoned_dataset
@@ -39,12 +39,10 @@ class Client(object):
         if(self.unlearning and self.attack=='True'):
             self.train_loader=self.load_train_data(poison=True)
             self.test_loader=self.load_test_data(poison=True)
-            # self.train_samples = len(self.train_loader.dataset)*5
             
         else:
             self.train_loader=self.load_train_data()
             self.test_loader=self.load_test_data()
-            # self.train_samples = len(self.train_loader.dataset)
 
         self.train_samples = len(self.train_loader.dataset)
         # check BatchNorm
@@ -194,6 +192,3 @@ class Client(object):
             item_path = self.save_folder_name
         return torch.load(os.path.join(item_path, "client_" + str(self.id) + "_" + item_name + ".pt"))
 
-    # @staticmethod
-    # def model_exists():
-    #     return os.path.exists(os.path.join("models", "server" + ".pt"))

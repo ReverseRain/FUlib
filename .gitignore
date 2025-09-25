@@ -1,10 +1,13 @@
 /dataset/Cifar100/
 /results
-/system/models
+/system/models_*
 /dataset/Cifar10/
 /dataset/Cifar10_noniid/
 /dataset/Cifar100_noniid/
-/system/job_out
+/dataset/Cifar100_test_2/
+/dataset/Cifar10_test_2/
+/dataset/Cifar10_test/
+/system/job_out_*
 /system/melt.sh
 /system/submit_cifar100.sh
 /system/submit.sh
@@ -17,3 +20,6 @@
 /system/*.ipynb
 /system/*.out
 /system/*.sh
+/dataset/*.out
+/system/log_out
+/system/cifar10*
