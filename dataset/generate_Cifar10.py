@@ -9,7 +9,7 @@ from utils.dataset_utils import check, separate_data, split_data, save_file, sam
 
 random.seed(1)
 np.random.seed(1)
-num_clients = 10
+num_clients = 30
 dir_path = "Cifar10/"
 
 
@@ -120,20 +120,30 @@ def cross_data_init(dir_path, num_clients, niid, balance, partition):
             idx.extend(indices)
         idx_ls.append(idx)
     corss_idx = idx_ls[0][:int(len(idx_ls[0])*0.1)]
-    idx_ls[0] = idx_ls[0][int(len(idx_ls[0])*0.1):]+idx_ls[1]
-    idx_ls[1] = corss_idx
-    remain_idx = []
-    for idx in range(1, num_clients):
-        remain_idx.extend(idx_ls[idx])
-    random.shuffle(remain_idx)
-    sublist_size = len(remain_idx) // (num_clients-1)
-    remainder = len(remain_idx) % (num_clients-1)
+    # idx_ls[0] = idx_ls[0][int(len(idx_ls[0])*0.1):]+idx_ls[1]
+    # idx_ls[1] = corss_idx
+    # remain_idx = []
+    # for idx in range(1, num_clients):
+    #     remain_idx.extend(idx_ls[idx])
+    # random.shuffle(remain_idx)
+    # sublist_size = len(remain_idx) // (num_clients-1)
+    # remainder = len(remain_idx) % (num_clients-1)
 
-    sublists = [remain_idx[i * sublist_size + min(i, remainder):(i + 1) * sublist_size + min(i + 1, remainder)] for i in
-                range(9)]
+    # sublists = [remain_idx[i * sublist_size + min(i, remainder):(i + 1) * sublist_size + min(i + 1, remainder)] for i in
+    #             range(9)]
 
-    for idx in range(1, num_clients):
-        idx_ls[idx] = sublists[idx-1]
+    # for idx in range(1, num_clients):
+    #     idx_ls[idx] = sublists[idx-1]
+    
+    # new_idx_ls=[]
+    # for idx in range(num_clients):
+    #     new_idx_ls[idx]=idx_ls[idx][int(len(idx_ls[idx])*0.5):]+idx_ls[idx%10][:int(len(idx_ls[idx%10])*0.5)]
+    new_idx_ls = [
+        idx_ls[idx][int(len(idx_ls[idx]) * 0.5):] +
+        idx_ls[idx % 10][:int(len(idx_ls[idx % 10]) * 0.5)]
+        for idx in range(num_clients)
+    ]
+    idx_ls = new_idx_ls
 
     statistic = [[] for _ in range(num_clients)]
     for user in range(num_clients):
@@ -157,8 +167,8 @@ if __name__ == "__main__":
     partition = sys.argv[3] if sys.argv[3] != "-" else None
 
     # if(niid):
-    #     dir_path="Cifar10_noniid/"
-    dir_path="Cifar10_test_2/"
+    #     dir_path="Cifar10_noniid_dir/"
+    dir_path="Cifar10_noniid_client30/"
 
-    # generate_dataset(dir_path, num_clients, niid, balance, partition)
-    cross_data_init(dir_path, num_clients, niid, balance, partition)
+    generate_dataset(dir_path, num_clients, niid, balance, partition)
+    # cross_data_init(dir_path, num_clients, niid, balance, partition)

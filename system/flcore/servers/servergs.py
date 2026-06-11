@@ -31,6 +31,9 @@ class FedGS(Server):
         self.Budget = []
         self.unlearn_Budget=[] #计时unlearning的时间
 
+        self.unlearning_grad = None
+        self.normal_grad = None
+
 
 
 
@@ -98,11 +101,10 @@ class FedGS(Server):
         for client in self.clients:
             tot_samples += client.train_samples
         self.send_models_target()
-        self.send_proxy()
         for client in self.unlearning_clients:
             if self.args.positive_sample=='aug':
                 client.getPairLoader2()
-            else:
+            elif self.args.negative_sample!='label':
                 client.getPairLoader()
         for i in range(self.unlearning_ground+1):
             s_t = time.time()
@@ -112,40 +114,43 @@ class FedGS(Server):
 
             self.send_models()
             self.send_models_target()
+            if(i==0):
+                self.warm_up()
             self.evaluate()
-
+            
             for client in self.unlearning_clients:
                 client.unlearning_train()
-            for client in self.clients:
+            for client in self.selected_clients:
                 client.train()
 
             gm = torch.cat([p.view(-1) for p in self.global_model.parameters()], dim=0).detach()
-            
-            unlearning_grad = torch.zeros_like(gm)
-            normal_grad=[]
 
-            
+            self.unlearning_grad = torch.zeros_like(gm)
             self.receive_models_target()
             for weights in self.uploaded_models:
                 pm=torch.cat([p.view(-1) for p in weights.parameters()], dim=0).detach()
-                unlearning_grad+=(pm-gm)/len(self.uploaded_models)
-            # self.aggregate_parameters()
+                self.unlearning_grad+=(pm-gm)/len(self.uploaded_models)
 
-            # 记录正常用户更新的方向
+            self.normal_grad = []
             self.receive_models()
             for w,weights in zip(self.uploaded_weights,self.uploaded_models):
                 pm=torch.cat([p.view(-1) for p in weights.parameters()], dim=0).detach() 
-                normal_grad.append((pm-gm)*w)
+                self.normal_grad.append((pm-gm)*w)
+
             start = time.time()
             if self.args.gradient_hadle == "GEM":
-                unlearning_grad=self.PROJECT(unlearning_grad,normal_grad)
+                unlearning_grad=self.PROJECT(self.unlearning_grad,self.normal_grad)
             elif self.args.gradient_hadle == "OSD":
-                normal_grad = [grad.to(dtype=torch.float32) for grad in normal_grad]
-                G = torch.stack(normal_grad, dim=0)
-                unlearning_grad=self.get_nearest_oth_d(G,unlearning_grad)
+                self.normal_grad = [grad.to(dtype=torch.float32) for grad in self.normal_grad]
+                G = torch.stack(self.normal_grad, dim=0)
+                unlearning_grad=self.get_nearest_oth_d(G,self.unlearning_grad)
+            else:
+                unlearning_grad = self.unlearning_grad
+                
             print("gradient handle time:   ",time.time()-start)
             self.overwrite_grad(self.global_model.parameters,unlearning_grad)
             
+            # self.cka_analyse()
 
             self.unlearn_Budget.append(time.time() - s_t)
             print('-'*25, 'time cost', '-'*25, self.unlearn_Budget[-1])
@@ -154,6 +159,8 @@ class FedGS(Server):
 
         print("MIA Attacker to unlearning model precision = {:.4f}".format(PRE_unlearning))
         print("MIA Attacker to unlearning model recall = {:.4f}".format(REC_unlearning))
+        # self.cka_analyse()
+        # self.dist_Analyse()
 
         self.save_unlearning(PRE_unlearning)
     
@@ -170,19 +177,10 @@ class FedGS(Server):
 
             pointer += num_params
 
-    def PROJECT(self,g, old_gradients,margin=0.5):
+    def PROJECT(self,g, old_gradients,margin=0.5):   
+
         g = g.to(dtype=torch.float32)
         old_gradients = [grad.to(dtype=torch.float32) for grad in old_gradients]
-        angles = [round((torch.dot(grad,g)/(torch.norm(grad)*torch.norm(g))).item(),3) for grad in old_gradients]
-        angles_deg = [round(math.degrees(math.acos(cos)), 2) for cos in angles]
-        # mean_ang=np.mean(angles)
-        # print('before ',mean_ang)
-        # min_angle= np.min(angles)
-        # print('after min',min_angle)
-        # mean_deg = np.mean(angles_deg)
-        # print('before mean',mean_deg)
-        # max_deg = np.max(angles_deg)
-        # print('after max',max_deg)
 
         device = g.device
         G = torch.stack(old_gradients, dim=0)
@@ -193,10 +191,10 @@ class FedGS(Server):
 
         optimizer = torch.optim.Adam([v], lr=0.01)
         
-        GGT = torch.mm(G, G.T)                # [num_old_tasks, num_old_tasks]
-        Gg = torch.mv(G, g)                   # [num_old_tasks]
+        GGT = torch.mm(G, G.T)
+        Gg = torch.mv(G, g)
         for i in range(30):
-            # 计算目标函数: 0.5 * v^T (G G^T) v + g^T G^T v
+            # target function: 0.5 * v^T (G G^T) v + g^T G^T v
             loss = 0.5 * torch.dot(v, torch.mv(GGT, v)) + torch.dot(v, Gg)
 
             optimizer.zero_grad()
@@ -210,6 +208,10 @@ class FedGS(Server):
         g_tilde = g + torch.mv(G.T, v)  # [num_params]
         angles = [round((torch.dot(grad,g_tilde)/(torch.norm(grad)*torch.norm(g_tilde))).item(),3) for grad in old_gradients]
         angles_deg = [round(math.degrees(math.acos(cos)), 2) for cos in angles]
+
+        angles_less_90 = [a for a in angles_deg if a < 90]
+
+        ratio = len(angles_less_90) / len(angles_deg)
         # mean_ang=np.mean(angles)
         # print('after ',mean_ang)
         # min_angle= np.min(angles)
@@ -221,11 +223,6 @@ class FedGS(Server):
 
         return g_tilde
     
-    def send_proxy(self):
-        data=read_proxy_data(self.dataset)
-        proxy_loader=DataLoader(data, self.batch_size, shuffle=True)
-        for client in self.unlearning_clients:
-            client.proxy_loader=proxy_loader
     
     def get_nearest_oth_d(self, gr_locals, gu):
         A = gr_locals

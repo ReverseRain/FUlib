@@ -98,6 +98,8 @@ class FedBU(Server):
 
             self.send_models()
             self.send_models_target()
+            if(i==0):
+                self.warm_up()
             self.evaluate()
             for client in self.unlearning_clients:
                 client.unlearning_train()

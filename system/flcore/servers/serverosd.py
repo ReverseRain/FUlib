@@ -27,7 +27,8 @@ class FedOSD(Server):
         self.Budget = []
         self.unlearn_Budget=[] #计时unlearning的时间
 
-
+        self.unlearning_grad = None
+        self.normal_grad = None
 
 
     def train(self):
@@ -88,41 +89,49 @@ class FedOSD(Server):
     
         self.clients = [client for client in self.clients if client not in self.unlearning_clients]
         
-        
+        self.opt_ul = torch.optim.SGD(self.global_model.parameters(), lr=self.args.unlearning_rate
+                                         ,momentum=0.9,weight_decay=0.0005)
+
         for i in range(self.unlearning_ground+1):
             s_t = time.time()
             self.selected_clients = self.select_clients()
             print(f"\n-------------Round number: {i}-------------")
             print("\nEvaluate global model")
             self.send_models()
-            self.send_models_target()
+            for client in self.unlearning_clients:
+                client.model = copy.deepcopy(self.global_model)
+            if(i==0):
+                self.warm_up()
             self.evaluate()
+            model = copy.deepcopy(self.global_model)
+            gm = torch.cat([p.view(-1) for p in self.global_model.parameters()], dim=0)  
 
             for client in self.unlearning_clients:
                 client.unlearning_train()
-            for client in self.clients:
+            # self.unlearning_noise(model)
+            for client in self.selected_clients:
                 client.train()
-
             
-            gm = torch.cat([p.view(-1) for p in self.global_model.parameters()], dim=0)  
-            unlearning_grad = torch.zeros_like(gm)
-            normal_grad=[]
+            
             # 记录遗忘梯度的方向
+            
+            self.unlearning_grad = torch.zeros_like(gm)
             self.receive_models_target()
             for weights in self.uploaded_models:
                 pm=torch.cat([p.view(-1) for p in weights.parameters()], dim=0) 
-                unlearning_grad+=(pm-gm)/len(self.uploaded_models)
+                self.unlearning_grad+=(pm-gm)/len(self.uploaded_models)
 
             # 记录正常用户更新的方向
+            self.normal_grad=[]
             self.receive_models()
             for weights in self.uploaded_models:
                 pm=torch.cat([p.view(-1) for p in weights.parameters()], dim=0) 
-                normal_grad.append(pm-gm)
+                self.normal_grad.append(pm-gm)
 
-            normal_grad = [grad.to(dtype=torch.float32) for grad in normal_grad]
-            G = torch.stack(normal_grad, dim=0)
+            self.normal_grad = [grad.to(dtype=torch.float32) for grad in self.normal_grad]
+            G = torch.stack(self.normal_grad, dim=0)
 
-            unlearning_grad=self.get_nearest_oth_d(G,unlearning_grad)
+            unlearning_grad=self.get_nearest_oth_d(G,self.unlearning_grad)
             self.overwrite_grad(self.global_model.parameters,unlearning_grad)
             
             self.unlearn_Budget.append(time.time() - s_t)
@@ -135,21 +144,6 @@ class FedOSD(Server):
         print("MIA Attacker to unlearning model precision = {:.4f}".format(PRE_unlearning))
         print("MIA Attacker to unlearning model recall = {:.4f}".format(REC_unlearning))
         self.save_unlearning(PRE_unlearning)
-
-        # self.send_models_target()
-        # target_client = self.unlearning_clients[0]
-        # sne_list=[]
-        # for i, data in enumerate(target_client.sne_loader):
-        #     x,y=data
-        #     if type(x) == type([]):
-        #         x[0] = x[0].to(self.device)
-        #     else:
-        #         x = x.to(self.device)
-        #     y = y.to(self.device)
-        #     output=target_client.model(x)
-        #     sne_list.append(F.softmax(output,dim=-1))
-        #     # sne_list.append(output)
-        # torch.save(sne_list,"OSD_sne.pt")
         
     
     def get_nearest_oth_d(self, gr_locals, gu):

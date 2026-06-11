@@ -13,6 +13,10 @@ from utils.dlg import DLG
 from utils.attack_utils import attack,train_attack_model
 import matplotlib.pyplot as plt
 import xgboost as xgb
+import pandas as pd
+import math
+import torch.nn as nn
+from torch.utils.data import DataLoader
 
 
 class Server(object):
@@ -77,6 +81,9 @@ class Server(object):
         self.old_global_model=[]
         self.attacker = xgb.XGBClassifier()
 
+        self.attack_df = pd.DataFrame(columns=['attack_accuracy'])
+        self.test_df = pd.DataFrame(columns=['test_accuracy'])
+
     def set_clients(self, clientObj):
         for i, train_slow, send_slow in zip(range(self.num_clients), self.train_slow_clients, self.send_slow_clients):
             train_data = read_client_data(self.dataset, i, is_train=True)
@@ -111,8 +118,9 @@ class Server(object):
     def select_clients(self):
         if self.random_join_ratio:
             self.current_num_join_clients = np.random.choice(range(self.num_join_clients, self.num_clients+1), 1, replace=False)[0]
-        else:
-            self.current_num_join_clients = len(self.clients)
+        # else:
+        #     self.current_num_join_clients = len(self.clients)
+        self.current_num_join_clients = len(self.clients) if self.join_ratio==1 else self.current_num_join_clients
         selected_clients = list(np.random.choice(self.clients, self.current_num_join_clients, replace=False))
 
         return selected_clients
@@ -157,7 +165,6 @@ class Server(object):
         self.global_model = copy.deepcopy(self.uploaded_models[0])
         for param in self.global_model.parameters():
             param.data.zero_()
-
         for w, client_model in zip(self.uploaded_weights, self.uploaded_models):
             self.add_parameters(w, client_model)
 
@@ -166,7 +173,7 @@ class Server(object):
             server_param.data += client_param.data.clone() * w
 
     def save_global_model(self):
-        model_path = os.path.join("models_seed"+str(self.args.seed_num), self.dataset)
+        model_path = os.path.join("models_seed"+str(self.args.seed_num)+"_resnet", self.dataset)
         if not os.path.exists(model_path):
             os.makedirs(model_path)
         if(self.args.learning_state!="retrain"):
@@ -192,7 +199,8 @@ class Server(object):
         torch.save(self.global_model, model_path)
 
     def load_model(self):
-        model_path = os.path.join("models_seed"+str(self.args.seed_num), self.dataset)
+        model_path = os.path.join("models_seed"+str(self.args.seed_num)+"_resnet", self.dataset)
+        print('model path',model_path)
         if(self.algorithm=="FedFUKD" or self.algorithm=="FedEraser"):
             history_path=os.path.join(model_path,"history")
             history_path=os.path.join(history_path,((''.join(map(str, self.args.unlearning_clients))
@@ -255,27 +263,41 @@ class Server(object):
 
         att_correct=[]
         att_num_samples=[]
+        overlap_acc=[]
+        unique_acc=[]
+
+        overlap_num=[]
+        unique_num=[]
 
         # tag_correct=[]
         # tag_num_samples=[]
 
         for c in self.clients:
             if(c.unlearning==False):
-                ct, ns, auc = c.test_metrics()
+                ct, ns, auc, oc, uc, on, un = c.test_metrics()
                 tot_correct.append(ct*1.0)
                 tot_auc.append(auc*ns)
                 num_samples.append(ns)
+                overlap_acc.append(oc*1.0)
+                overlap_num.append(on)
+                unique_acc.append(uc*1.0)
+                unique_num.append(un)
             
         for c in self.unlearning_clients:
-            ct, ns, auc = c.test_metrics()
+            ct, ns, auc, oc, uc, on, un = c.test_metrics()
             att_correct.append(ct*1.0)
             att_num_samples.append(ns)
+            # overlap_acc.append(oc*1.0)
+            # overlap_num.append(on)
+            unique_acc.append(uc*1.0)
+            unique_num.append(un)
 
         
 
         ids = [c.id for c in self.clients]
 
-        return ids, num_samples, tot_correct, tot_auc,att_num_samples,att_correct
+        return ids, num_samples, tot_correct, tot_auc,att_num_samples,att_correct\
+            , overlap_acc, overlap_num, unique_acc, unique_num
 
     def train_metrics(self):
         if self.eval_new_clients and self.num_new_clients > 0:
@@ -283,25 +305,30 @@ class Server(object):
         
         num_samples = []
         forget_num_sample = []
+        retain_num_sample = []
+        retain_acc = []
+        forget_acc = []
         losses = []
-        forget_acc=[]
-        retain_acc=[]
+        
         for c in self.clients:
             if(not c.unlearning):
                 cl, ns, ct= c.train_metrics()
                 num_samples.append(ns)
-                retain_acc.append(ct*1.0)
                 losses.append(cl*1.0)
-        if(self.args.learning_state=='retrain'):
-            self.send_models_target()
-        for c in self.unlearning_clients:
-            cl, ns, ct= c.train_metrics()
-            forget_num_sample.append(ns)
-            forget_acc.append(ct*1.0)
+                retain_acc.append(ct*1.0)
+                retain_num_sample.append(ns)
+            else:
+                cl, ns, ct= c.train_metrics()
+                num_samples.append(ns)
+                losses.append(cl*1.0)
+                forget_acc.append(ct*1.0)
+                forget_num_sample.append(ns)
 
         ids = [c.id for c in self.clients]
 
-        return ids, num_samples, losses, forget_num_sample, forget_acc, retain_acc
+        return ids, num_samples, losses, forget_acc, forget_num_sample\
+        ,retain_acc,retain_num_sample
+
 
     # evaluate selected clients
     def evaluate(self, acc=None, loss=None):
@@ -310,13 +337,16 @@ class Server(object):
 
         test_acc = sum(stats[2])*1.0 / sum(stats[1])
         test_auc = sum(stats[3])*1.0 / sum(stats[1])
+        overlap_acc = sum(stats[6])*1.0 / sum(stats[7]) if sum(stats[7])!=0 else 0
+        unique_acc = sum(stats[8])*1.0 / sum(stats[9]) if sum(stats[9])!=0 else 0
+
+        forget_acc = sum(stats_train[3])*1.0 / sum(stats_train[4]) if sum(stats_train[4])!=0 else 0
+        retain_acc = sum(stats_train[5])*1.0 / sum(stats_train[6]) if sum(stats_train[6])!=0 else 0
         train_loss = sum(stats_train[2])*1.0 / sum(stats_train[1])
         accs = [a / n for a, n in zip(stats[2], stats[1])]
         aucs = [a / n for a, n in zip(stats[3], stats[1])]
 
         attack_acc = sum(stats[5])*1.0 / sum(stats[4]) if self.unlearning_clients else 0
-        retain_acc = sum(stats_train[5])*1.0 / sum(stats_train[1])
-        forget_acc = sum(stats_train[4])*1.0 / sum(stats_train[3]) if self.unlearning_clients else 0
         # target_acc = sum(stats[7])*1.0 / sum(stats[6])
         
         if acc == None:
@@ -334,22 +364,30 @@ class Server(object):
         print("Averaged Train Loss: {:.4f}".format(train_loss))
         print("Averaged Test Accurancy: {:.4f}".format(test_acc))
         print("Averaged Test AUC: {:.4f}".format(test_auc))
-        print("Averaged Retain Accurancy: {:.4f}".format(retain_acc))
-        print("Averaged Forget Accurancy: {:.4f}".format(forget_acc))
+        print("Averaged Overlapping Accurancy: {:.4f}".format(overlap_acc))
+        # print("Averaged Unique Accurancy: {:.4f}".format(unique_acc))
+
+        # print("Averaged Forget Accurancy: {:.4f}".format(forget_acc))
+        # print("Averaged Retain Accurancy: {:.4f}".format(retain_acc))
         # self.print_(test_acc, train_acc, train_loss)
         print("Std Test Accurancy: {:.4f}".format(np.std(accs)))
         print("Std Test AUC: {:.4f}".format(np.std(aucs)))
         print("Average Attack Accurancy:{:.4f}".format(attack_acc))
-        # print("Average F-Accurancy:{:.4f}".format(stats[-2]))
-        # print("Average C-Accurancy:{:.4f}".format(stats[-1]))
-        # print("Average Target Client Accurancy:{:.4f}".format(target_acc))
-        # if(isUnlearning):
-        #     if(self.attack_model==None):
-        #         self.attack_model=train_attack_model()
+        
+        new_attack_row = pd.DataFrame({'attack_accuracy': [attack_acc]})
+        new_test_row = pd.DataFrame({'test_accuracy': [test_acc]})
+
+        self.attack_df = pd.concat([self.attack_df, new_attack_row], ignore_index=True)
+        self.test_df = pd.concat([self.test_df, new_test_row], ignore_index=True)
+
+    def save_curve(self):
+        model_path = os.path.join("models_seed"+str(self.args.seed_num)+"_resnet", self.dataset)
+        model_path = os.path.join(model_path, "csv")
+        if not os.path.exists(model_path):
+            os.makedirs(model_path)
             
-        #     print("Averaged KL Divergency: {:.4f}".format(KL_Divergency))
-
-
+        self.attack_df.to_csv(model_path+'/'+str(self.args.attack)+"_"+str(self.algorithm)+'_attack_accuracy.csv', index=False)
+        self.test_df.to_csv(model_path+'/'+str(self.args.attack)+"_"+str(self.algorithm)+'_test_accuracy.csv', index=False)
 
     def print_(self, test_acc, test_auc, train_loss):
         print("Average Test Accurancy: {:.4f}".format(test_acc))
@@ -476,14 +514,21 @@ class Server(object):
             
             client.set_parameters(self.global_model)
     
-    def receive_models_target(self):
+    def receive_models_target(self,is_all=False):
         assert (len(self.unlearning_clients) > 0)
 
         self.uploaded_ids = []
         self.uploaded_weights = []
         self.uploaded_models = []
         tot_samples = 0
-        for client in self.unlearning_clients:
+        if is_all:
+            active_clients = random.sample(
+                self.selected_clients, int((1-self.client_drop_rate) * self.current_num_join_clients))
+            target_clients = active_clients + self.unlearning_clients
+        else:
+            target_clients = self.unlearning_clients
+        
+        for client in target_clients:
             try:
                 client_time_cost = client.train_time_cost['total_cost'] / client.train_time_cost['num_rounds'] + \
                         client.send_time_cost['total_cost'] / client.send_time_cost['num_rounds']
@@ -496,7 +541,6 @@ class Server(object):
                 self.uploaded_models.append(client.model)
         for i, w in enumerate(self.uploaded_weights):
             self.uploaded_weights[i] = w / tot_samples
-    
     def save_unlearning(self,mia_pre):
         entry = {
             "name":self.algorithm,
@@ -514,6 +558,13 @@ class Server(object):
         file_path=result_path+"{}.json".format(algo)
         with open(file_path, 'w') as file:
             json.dump(entry, file, indent=2)
+        # model_path=model_path = os.path.join("unlearning", self.dataset)
+        # if not os.path.exists(model_path):
+        #     os.makedirs(model_path)
+        
+        # model_path = os.path.join(model_path, "FUGAS.pt")
+        # torch.save(self.unlearning_clients[0].model, model_path)
+        
 
     def save_loss(self,global_rounds):
         save_dir = "loss_img"  # 指定保存目录路径
@@ -556,7 +607,8 @@ class Server(object):
             self.selected_clients = self.select_clients()
             self.send_models()
             self.send_models_target()
-
+            if(i==0):
+                self.warm_up()
             
             print(f"\n-------------Round number: {i}-------------")
             print("\nEvaluate global model")
@@ -592,3 +644,243 @@ class Server(object):
             param.data=param.data+(param_data)
 
             pointer += num_params
+    
+    def warm_up(self):
+        for c in self.clients:
+            c.warm_up()
+        for c in self.unlearning_clients:
+            c.model.train()
+            c.warm_up()
+    
+    def print_head(self):
+        W_bias_un = 0
+        W_bias_norm = []
+
+        W = self.global_model.head.weight          # (out, in)
+        b = self.global_model.head.bias            # (out,)
+
+        W_0 = torch.cat([W, b.unsqueeze(1)], dim=1).view(-1)
+        
+        for c in self.unlearning_clients:
+            W = c.model.head.weight          # (out, in)
+            b = c.model.head.bias            # (out,)
+
+            W_bias_un = torch.cat([W, b.unsqueeze(1)], dim=1).view(-1) - W_0
+        
+        for c in self.clients:
+            W = c.model.head.weight          # (out, in)
+            b = c.model.head.bias            # (out,)
+
+            W_bias = torch.cat([W, b.unsqueeze(1)], dim=1).view(-1) - W_0
+            W_bias_norm.append(W_bias)
+        
+        angles = [round((torch.dot(grad,W_bias_un)/(torch.norm(grad)*torch.norm(W_bias_un))).item(),3) for grad in W_bias_norm]
+
+        angles_deg = [round(math.degrees(math.acos(cos)), 2) for cos in angles]
+        mean_ang=np.mean(angles_deg)
+        print("angles",mean_ang)
+    
+    def print_base(self):
+        W_bias_un = 0
+        W_bias_norm = []
+
+        bm = torch.cat([p.view(-1) for p in self.global_model.base.layer1.parameters()], dim=0).detach()
+
+        for c in self.unlearning_clients:
+            um = torch.cat([p.view(-1) for p in c.model.base.layer1.parameters()], dim=0).detach() - bm
+        
+        list = []
+
+        for c in self.clients:
+            m = torch.cat([p.view(-1) for p in c.model.base.layer1.parameters()], dim=0).detach() - bm
+            list.append(m)
+
+        angles = [round((torch.dot(grad,um)/(torch.norm(grad)*torch.norm(um))).item(),3) for grad in list]
+
+        angles_deg = [round(math.degrees(math.acos(cos)), 2) for cos in angles]
+        mean_ang=np.mean(angles_deg)
+        print("layers 1 angles",mean_ang)
+    
+    def cka_analyse(self):
+        # 在正常客户端 学习 和 遗忘客户端 遗忘后 在遗忘数据集上的输出对比
+        # 这里随机选取一个正常客户端的模型做各层的对比
+        from torch_cka import CKA
+
+        dataloader = self.unlearning_clients[0].train_loader
+        # dataloader = self.clients[1].test_loader
+        # model1 = copy.deepcopy(self.unlearning_clients[0].model)
+        model1 = copy.deepcopy(self.global_model)
+        model_path = os.path.join("models_seed"+str(self.args.seed_num)+"_resnet", self.dataset)
+        model_path = os.path.join(model_path, ((''.join(map(str, self.args.unlearning_clients)) + 
+                                      "_attack_server" ) if self.args.attack=='True' else "_server") + ".pt")
+        model2 = torch.load(model_path, map_location='cuda' if torch.cuda.is_available() else 'cpu',weights_only=False)
+
+        model1.eval()
+        model2.eval()
+        cka = CKA(model1=model1, model2=model2,
+                            model1_layers=[
+                                # 'base.ResNet.maxpool',
+                                            'base.layer1',
+                                            'base.layer2',
+                                            'base.layer3',
+                                            'base.layer4',
+                                            'head'
+                                            ],
+                            model2_layers=[
+                                            # 'base.ResNet.maxpool',
+                                            'base.layer1',
+                                            'base.layer2',
+                                            'base.layer3',
+                                            'base.layer4',
+                                            'head'
+                                            ],
+                            model1_name='unlearning model',
+                            model2_name='leanring model',
+                            device='cuda' if torch.cuda.is_available() else 'cpu')
+
+        # 计算 CKA
+        # cka.hsic_matrix = torch.nan_to_num(cka.hsic_matrix, nan=0.0)
+        cka.kernel = "linear"
+        cka.compare(dataloader)
+        cka.plot_results(save_path="specified_layers_cka_"+self.algorithm+".png")
+        cka_matrix = cka.export()['CKA']  # 或 cka_matrix = cka.CKA_matrix
+        diagonal_values = cka_matrix.diagonal()
+        print('diagonal_values ',diagonal_values)
+        layers = ['layer1','layer2','layer3','layer4','head']
+
+        plt.figure(figsize=(14, 10))
+        bars = plt.bar(layers, diagonal_values, color='#89d1fe')
+
+        plt.xticks(fontsize=32)
+        plt.yticks(fontsize=16)
+        plt.ylabel('CKA Similarity Score',fontsize=32)
+        plt.title(self.algorithm+' vs Learning Models',fontsize=32)
+        plt.ylim(0, 1) 
+        plt.grid(axis='y', linestyle='--', alpha=0.7)
+
+        plt.savefig('cka_'+self.algorithm+'.png', dpi=300)
+        return
+    
+    def dist_Analyse(self):
+        # 这里衡量各层参数之间的距离
+        def get_layer_params(model, layer_names):
+            params = {}
+            for name, param in model.named_parameters():
+                for layer in layer_names:
+                    if layer in name:
+                        params[layer] = param.data.clone()
+                        break
+            return params
+        
+        layer_names = [
+            "base.layer1",
+            "base.layer2",
+            "base.layer3",
+            "base.layer4",
+            "head"
+        ]
+
+        # model1 = copy.deepcopy(self.global_model)
+        model1 = torch.load("./models_seed42_resnet/Cifar10/retrain_model_1_2.pt", \
+                            map_location='cuda' if torch.cuda.is_available() else 'cpu',weights_only=False)
+        model_path = os.path.join("models_seed"+str(self.args.seed_num)+"_resnet", self.dataset)
+        model_path = os.path.join(model_path, ((''.join(map(str, self.args.unlearning_clients)) + 
+                                      "_attack_server" ) if self.args.attack=='True' else "_server") + ".pt")
+        model2 = torch.load(model_path, map_location='cuda' if torch.cuda.is_available() else 'cpu',weights_only=False)
+        
+        params1 = get_layer_params(model1, layer_names)
+        params2 = get_layer_params(model2, layer_names)
+
+        l2_distances = {}
+
+        for layer in layer_names:
+            if layer in params1 and layer in params2:
+                dist = torch.norm(params1[layer] - params2[layer], p=2).item()/torch.norm(params1[layer], p=2).item()
+                l2_distances[layer] = dist
+        
+        print("l2_distances ",l2_distances)
+        return
+
+    
+    def post_learning_noise(self):
+        self.clients = [client for client in self.clients if client not in self.unlearning_clients]
+        
+        self.opt_ul = torch.optim.SGD(self.global_model.parameters(), lr=self.args.unlearning_rate
+                                         ,momentum=0.9,weight_decay=0.0005)
+        
+        noise_loader = self.get_pure_noise()
+
+        model = copy.deepcopy(self.global_model)
+        for i in range(self.post_training_ground+1):
+            s_t = time.time()
+            self.selected_clients = self.select_clients()
+            print(f"\n-------------Round number: {i}-------------")
+            print("\nEvaluate global model")
+
+            self.send_models()
+            # self.send_models_target()
+            for client in self.unlearning_clients:
+                client.model = copy.deepcopy(self.global_model)      
+
+            self.evaluate()
+
+            criterion = nn.CrossEntropyLoss()
+            
+            for i, (x, y) in enumerate(noise_loader):
+                if type(x) == type([]):
+                    x[0] = x[0].to(self.device)
+                else:
+                    x = x.to(self.device)
+                y = y.to(self.device)
+                
+                output = self.global_model(x) 
+
+                loss = criterion(output, y)
+
+                gm = torch.cat([p.data.view(-1) for p in self.global_model.base.parameters()], dim=0)
+                pm = torch.cat([p.data.view(-1) for p in model.base.parameters()], dim=0)
+                loss += torch.norm(gm-pm, p=2) * 0.05
+                # head lamda 0.1 base 0.05
+
+                # loss = self.UnLearningCELoss(output,y)
+                self.opt_ul.zero_grad()
+                loss.backward()
+                torch.nn.utils.clip_grad_norm_(self.global_model.parameters(), max_norm=5.0)
+                self.opt_ul.step()
+
+            for client in self.selected_clients:
+                client.train()
+            self.aggregate_parameters_server(len(noise_loader.dataset))
+
+        (PRE_unlearning, REC_unlearning) = attack(self.global_model,self.attacker,self.unlearning_clients,self.num_classes,self.device)
+        
+        
+
+        print("MIA Attacker to unlearning model precision = {:.4f}".format(PRE_unlearning))
+        print("MIA Attacker to unlearning model recall = {:.4f}".format(REC_unlearning))
+
+    def aggregate_parameters_server(self,noise_samples):
+
+        active_clients = random.sample(
+            self.selected_clients, int((1-self.client_drop_rate) * self.current_num_join_clients))
+
+        self.uploaded_weights = []
+        self.uploaded_models = []
+        tot_samples = 0
+        for client in active_clients:
+            tot_samples += client.train_samples
+            self.uploaded_weights.append(client.train_samples)
+            self.uploaded_models.append(client.model)
+
+        tot_samples += noise_samples
+        self.uploaded_weights.append(noise_samples)
+        self.uploaded_models.append(copy.deepcopy(self.global_model))
+
+        for i, w in enumerate(self.uploaded_weights):
+            self.uploaded_weights[i] = w / tot_samples
+            
+        for param in self.global_model.parameters():
+            param.data.zero_()
+
+        for w, client_model in zip(self.uploaded_weights, self.uploaded_models):
+            self.add_parameters(w, client_model)

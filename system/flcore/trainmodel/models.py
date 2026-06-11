@@ -19,6 +19,27 @@ class BaseHeadSplit(nn.Module):
 
         return out
 # ====================================================================================================================
+class MLP(nn.Module):
+    def __init__(self, in_features=1, num_classes=10,hidden_dim=1024):
+        super(MLP, self).__init__()
+
+        self.mlp = nn.Sequential(
+            nn.Linear(in_features, 1024),
+            nn.BatchNorm1d(1024),
+            nn.LeakyReLU(True),
+            nn.Linear(1024, 2),
+            nn.BatchNorm1d(2),
+            nn.LeakyReLU(True),
+        )
+        self.fc = nn.Linear(2, num_classes)
+        
+    def forward(self, x):
+        x = torch.flatten(x, 1)
+        out = self.mlp(x)
+        out = self.fc(out)
+
+        return out
+# ====================================================================================================================
 class CNN(nn.Module):
     def __init__(self, in_features=1, num_classes=10, dim=1024):
         super().__init__()
@@ -73,7 +94,27 @@ class DNN(nn.Module):
         return x
 
 # ====================================================================================================================
+class OVRClassifier(nn.Module):
+    """OVR分类头：每个类别一个独立的二元分类器"""
+    def __init__(self, in_features, num_classes):
+        super(OVRClassifier, self).__init__()
+        self.num_classes = num_classes
+        
+        # 创建num_classes个独立的线性层
+        self.ovr_layers = nn.ModuleList()
+        for _ in range(num_classes):
+            self.ovr_layers.append(nn.Linear(in_features, 1))
+        
+    def forward(self, x):
+        outputs = []
+        for i in range(self.num_classes):
+            output = self.ovr_layers[i](x)
+            outputs.append(output)
+        
+        # 将结果拼接为(batch_size, num_classes)形状
+        return torch.cat(outputs, dim=1)
 
+# ====================================================================================================================
 class KMeans:
     def __init__(self, n_clusters=3, max_iter=300, tol=1e-4, random_state=None):
         self.n_clusters = n_clusters

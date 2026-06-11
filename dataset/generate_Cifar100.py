@@ -26,7 +26,7 @@ from utils.dataset_utils import check, separate_data, split_data, save_file, sam
 
 random.seed(1)
 np.random.seed(1)
-num_clients = 10
+num_clients = 30
 dir_path = "Cifar100/"
 
 
@@ -174,8 +174,8 @@ if __name__ == "__main__":
     partition = sys.argv[3] if sys.argv[3] != "-" else None
 
     # if(niid):
-    #     dir_path="Cifar100_noniid/"
-    dir_path="Cifar100_test_2/"
+    #     dir_path="Cifar100_noniid_dir/"
+    dir_path="Cifar100_noniid_client30/"
 
-    # generate_dataset(dir_path, num_clients, niid, balance, partition)
-    cross_data_init(dir_path, num_clients, niid, balance, partition)
+    generate_dataset(dir_path, num_clients, niid, balance, partition)
+    # cross_data_init(dir_path, num_clients, niid, balance, partition)

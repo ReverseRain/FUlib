@@ -1,11 +1,14 @@
+from collections import defaultdict
 import copy
 import torch
 import numpy as np
 import time
 import torchvision.transforms.functional as TF
+import torchvision.transforms as transforms
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 import random
+from utils.data_utils import read_client_data
 from flcore.clients.clientbase import Client
 
 
@@ -51,8 +54,9 @@ class clientGS(Client):
     
     def unlearning_train(self):
         
-        trainloader=self.paired_loader if self.args.contrastive=='True' else self.train_loader
-        # trainloader=self.train_loader
+        trainloader=self.paired_loader if (self.args.contrastive=='True' and self.args.negative_sample!='label') else self.train_loader
+        # trainloader=self.gradient_loader
+
         self.model.train()
 
         for i, data in enumerate(trainloader):
@@ -60,13 +64,13 @@ class clientGS(Client):
                 x, y = data 
             else:
                 x, y, y_aug = data
-        # for i, (x, y,y_aug) in enumerate(trainloader):
+                
             if type(x) == type([]):
                 x[0] = x[0].to(self.device)
             else:
                 x = x.to(self.device)
             y = y.to(self.device)
-            # y_aug = y_aug.to(self.device)
+
             output=self.model(x)
             if self.args.contrastive=='UCE':
                 loss=self.UnLearningCELoss(output,y)
@@ -79,13 +83,12 @@ class clientGS(Client):
                 y_aug = y_aug.to(self.device)
                 loss=self.pairLoss2(output,y,y_aug)
             else:
-                if(self.args.positive_sample=='label'):
+                if(self.args.negative_sample=='label'):
                     y = F.one_hot(y, self.args.num_classes).to(self.device)
                 loss=self.pairLoss(output,y)
             
             self.optimizer_ul.zero_grad()
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=10.0)
             self.optimizer_ul.step()
 
 
@@ -114,7 +117,7 @@ class clientGS(Client):
         return loss
     def pairLoss(self,pred,target):
         pred = F.softmax(pred, dim=-1)
-        t=3
+        t=self.args.temperature
 
         loss=(-1*torch.mean(torch.log(torch.sigmoid(-1*torch.sum(torch.mul(pred , target /t),dim=1)))))
         return loss
@@ -180,4 +183,4 @@ class clientGS(Client):
         output_aug_all = torch.cat(output_aug_all, dim=0)
 
         paired_data=[(x,y,y_aug) for x,y,y_aug in zip(x_all,output_all,output_aug_all)]
-        self.paired_loader=DataLoader(paired_data, self.batch_size, drop_last=True, shuffle=True)
+        self.paired_loader=DataLoader(paired_data, self.batch_size, drop_last=True, shuffle=True)    

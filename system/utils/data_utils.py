@@ -116,36 +116,21 @@ def read_proxy_data(dataset):
     
     return proxy_data
 
-def create_poisoned_dataset(origin_data,poison_flag,is_train,sne=False):
-    origin_data=5*origin_data if is_train else origin_data
+def create_poisoned_dataset(origin_data,poison_flag,is_train):
+    origin_data= 5*origin_data if is_train else origin_data
     poison_x = backdoor_pattern([
         x for x, y in origin_data 
         if is_train or (not is_train and y != poison_flag)
     ])
-    # poison_y=[(y+class_num // 2)%class_num for _,y in origin_data]
-    poison_y=[poison_flag for _ in poison_x]
-    if(sne==True):
-        poison_x = backdoor_pattern([
-        x for x, y in origin_data 
-        if y==3
-        ])
-        poison_dataset=[(x,9) for x in poison_x]
-        return poison_dataset
+    
+    poison_y=[torch.tensor(poison_flag) for _ in poison_x]
 
     poison_dataset=[(x,y) for x,y in zip(poison_x,poison_y)]
     
     return poison_dataset
 
+
 def backdoor_pattern(imgs):
     for img in imgs:
         img[:,2:9,2:9]=0
-        # img[:,25:28,20:23]=0
-    # image_np = imgs[7].numpy()
-    # image_np = np.transpose(image_np, (1, 2, 0))
-    # image_np = ((image_np - image_np.min()) / (image_np.max() - image_np.min()) * 255).astype(np.uint8)
-
-    # # 使用 plt.imshow 展示图像
-    # plt.imshow(image_np)
-    # plt.axis('off')  # 关闭坐标轴
-    # plt.show()
     return imgs

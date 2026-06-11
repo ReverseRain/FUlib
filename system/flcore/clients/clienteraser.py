@@ -37,8 +37,7 @@ class clientEraser(Client):
                 loss.backward()
                 self.optimizer.step()
 
-
-        if self.learning_rate_decay:
+        if not self.unlearning:
             self.learning_rate_scheduler.step()
 
 

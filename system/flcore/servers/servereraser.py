@@ -52,7 +52,7 @@ class FedEraser(Server):
             if self.dlg_eval and i%self.dlg_gap == 0:
                 self.call_dlg(i)
 
-            if (i%10==0):
+            if (i%(5*len(self.selected_clients))==0 and i!=0):
                 self.collect_delta()
             self.aggregate_parameters()
 
@@ -84,6 +84,42 @@ class FedEraser(Server):
             print(f"\n-------------Fine tuning round-------------")
             print("\nEvaluate new clients")
             self.evaluate()
+        
+        results_dict = {}
+        self.global_model.eval()
+
+        # 合并所有需要处理的 client 列表
+        all_clients = self.clients + self.unlearning_clients
+
+        with torch.no_grad():
+            for c in all_clients:
+                current_features = []
+                current_labels = []
+                
+                for i, data in enumerate(c.test_loader):
+                    x, y = data
+                    
+                    # 处理输入数据到设备
+                    if isinstance(x, list):
+                        x = [item.to(self.device) for item in x]
+                    else:
+                        x = x.to(self.device)
+                    
+                    # 提取特征 (这里使用 global_model.base)
+                    output = self.global_model(x)
+                    
+                    # 保存特征和对应的标签
+                    current_features.append(output.cpu())
+                    current_labels.append(y.cpu()) # 确保标签也被记录
+                
+                # 将当前 client 的所有 batch 数据合并
+                results_dict[c.id] = {
+                    'features': torch.cat(current_features, dim=0),
+                    'labels': torch.cat(current_labels, dim=0)
+                }
+
+        # 保存包含特征和标签的字典
+        torch.save(results_dict, "ALL_sne_grouped.pt")
 
     def collect_delta(self):
         for cid, client_model in zip(self.uploaded_ids, self.uploaded_models):

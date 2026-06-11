@@ -5,17 +5,21 @@ import os
 import time
 import numpy as np
 
-from utils.result_utils import average_data
 from flcore.trainmodel.models import *
 import torchvision
+import tracemalloc
 
 from flcore.servers.serverfukd import FedFUKD
 from flcore.servers.serverbu import FedBU
 from flcore.servers.serverpgd import FedPGD
 from flcore.servers.serverosd import FedOSD
 from flcore.servers.servergs import FedGS
-from flcore.servers.serverrome import FedROME
 from flcore.servers.servereraser import FedEraser
+from flcore.servers.serverrful import FedRFUL
+
+from FUlib.system.flcore.servers.serverFeatNoise import FedFeatNoise
+from FUlib.system.flcore.servers.serverNoise import FedNoise
+from flcore.servers.servernot import FedNOT
 
 
 def run(arg):
@@ -41,13 +45,27 @@ def run(arg):
             args.model = DNN(3*32*32, 100, num_classes=args.num_classes).to(args.device)
         else:
             args.model = DNN(60, 20, num_classes=args.num_classes).to(args.device)
-    elif model_str == "resnet": # non-convex
+    elif model_str == "resnet": 
         if "Cifar100" in args.dataset:
-            args.model = torchvision.models.resnet18(pretrained=False, num_classes=args.num_classes).to(args.device)
+            args.model = torchvision.models.resnet18(pretrained=True, num_classes=1000).to(args.device)
+            args.model.fc = torch.nn.Linear(args.model.fc.in_features, args.num_classes).to(args.device)
         elif "Cifar10" in args.dataset:
-            args.model = torchvision.models.resnet18(pretrained=False, num_classes=args.num_classes).to(args.device)
+            args.model = torchvision.models.resnet18(pretrained=True, num_classes=1000).to(args.device)
+            args.model.fc = torch.nn.Linear(args.model.fc.in_features, args.num_classes).to(args.device)
+    elif model_str == "resnet34": 
+        if "Cifar100" in args.dataset:
+            args.model = torchvision.models.resnet34(pretrained=True, num_classes=1000).to(args.device)
+            args.model.fc = torch.nn.Linear(args.model.fc.in_features, args.num_classes).to(args.device)
+        elif "Cifar10" in args.dataset:
+            args.model = torchvision.models.resnet34(pretrained=True, num_classes=1000).to(args.device)
+            args.model.fc = torch.nn.Linear(args.model.fc.in_features, args.num_classes).to(args.device)
+    elif model_str == "mlp":
+        args.model = MLP(in_features=3*32*32 if "Cifar10" in args.dataset else 10,num_classes=args.num_classes, hidden_dim=2).to(args.device)
+    elif model_str == "ovr":
+        args.model = torchvision.models.resnet18(pretrained=True, num_classes=1000).to(args.device)
+        args.model.fc = OVRClassifier(512, args.num_classes).to(args.device)
 
-    print(args.model)
+
 
     if args.algorithm == "FedEraser":
         args.head = copy.deepcopy(args.model.fc)
@@ -66,7 +84,7 @@ def run(arg):
         args.model.fc = nn.Identity()
         args.model = BaseHeadSplit(args.model, args.head)
         server = FedBU(args)
-    elif args.algorithm == "FedPGD":
+    elif args.algorithm == "PGD":
         # 本方法是复现论文 https://arxiv.org/pdf/2207.05521   PGD
         args.head = copy.deepcopy(args.model.fc)
         args.model.fc = nn.Identity()
@@ -84,6 +102,27 @@ def run(arg):
         args.model.fc = nn.Identity()
         args.model = BaseHeadSplit(args.model, args.head)
         server = FedGS(args)
+    elif args.algorithm == "RFUL":
+        args.head = copy.deepcopy(args.model.fc)
+        args.model.fc = nn.Identity()
+        args.model = BaseHeadSplit(args.model, args.head)
+        server = FedRFUL(args)
+    elif args.algorithm == "FedNoise":
+        args.head = copy.deepcopy(args.model.fc)
+        args.model.fc = nn.Identity()
+        args.model = BaseHeadSplit(args.model, args.head)
+        server = FedNoise(args)
+    elif args.algorithm == "FedFeatNoise":
+        args.head = copy.deepcopy(args.model.fc)
+        args.model.fc = nn.Identity()
+        args.model = BaseHeadSplit(args.model, args.head)
+        server = FedFeatNoise(args)
+    elif args.algorithm == "NoT":
+        args.head = copy.deepcopy(args.model.fc)
+        args.model.fc = nn.Identity()
+        args.model = BaseHeadSplit(args.model, args.head)
+        server = FedNOT(args)
+    
             
     if(args.learning_state=="learning"):
         print(f"\n============= Training start =============")
@@ -103,9 +142,12 @@ def run(arg):
         print(f"\n============= Unlearning start =============")
         
         server.unlearning()
+        
         if(args.post_training_ground!=0):
             print(f"\n============= Post-training start =============")
-            server.post_training(m)
+            # server.post_training(m)
+            server.post_learning_noise()
+
 
     elif(args.learning_state=="retrain"):
         print(f"\n============= Retrain start =============")
@@ -113,23 +155,13 @@ def run(arg):
         server.clients = [client for client in server.clients if client not in server.unlearning_clients]
         server.train()
     else:
-        server.global_model=torch.load("models_seed47/Cifar10_test/_server.pt",map_location=server.device,weights_only=False)
+        server.global_model=torch.load("models_seed42_resnet/Cifar10_test_2/retrain_model_.pt",map_location=server.device,weights_only=False)
         server.send_models()
         # server.attacker=train_attack_model(server.global_model,
         #                                    server.clients,server.num_classes,server.device)
         # attacker_path=os.path.join("models_seed47/Cifar10_test",("Backdoor_" if server.args.attack=='True' else "noBackdoor_") + "xgb_model.bin")
         # server.attacker.save_model(attacker_path)
-        for i, (x,y) in enumerate(server.clients[0].train_loader):
-            if type(x) == type([]):
-                x[0] = x[0].to(server.device)
-            else:
-                x = x.to(server.device)
-            y = y.to(server.device)
-            output=server.global_model(x)
-            print(output.shape)
-            return
-
-        return
+        server.evaluate()
         
     print("All done!")
 
@@ -198,14 +230,16 @@ if __name__ == "__main__":
     parser.add_argument("-ugr","--unlearning_ground", type=int,default=2)
     parser.add_argument("-s","--learning_state", type=str,default="learning")
     parser.add_argument("-att","--attack", type=str,default='False')
-    parser.add_argument('-ulr', "--unlearning_rate", type=float, default=1e-4)
+    parser.add_argument('-ulr', "--unlearning_rate", type=float, default=0.005)
     parser.add_argument("-pgr","--post_training_ground", type=int,default=0)
     # 用于消融实验
     parser.add_argument('-con', "--contrastive", type=str, default='True')
     parser.add_argument('-gra', "--gradient_hadle", type=str, default="GEM")
     parser.add_argument('-pos', "--positive_sample", type=str, default="None")
     parser.add_argument('-neg', "--negative_sample", type=str, default="None")
-    parser.add_argument('-seed', "--seed_num", type=int, default=45)
+    parser.add_argument('-tem', "--temperature", type=float, default=3)
+    parser.add_argument('-seed', "--seed_num", type=int, default=42)
+    parser.add_argument('-noise', "--noise_type", type=str, default="pure_noise")
     args = parser.parse_args()
 
     os.environ["CUDA_VISIBLE_DEVICES"] = args.device_id
@@ -221,6 +255,7 @@ if __name__ == "__main__":
     torch.manual_seed(args.seed_num)           
     torch.cuda.manual_seed(args.seed_num)      
     torch.cuda.manual_seed_all(args.seed_num)
+    # tracemalloc.start()
 
     # with torch.profiler.profile(
     #     activities=[
@@ -231,3 +266,6 @@ if __name__ == "__main__":
     #     ) as prof:
     # with torch.autograd.profiler.profile(profile_memory=True) as prof:
     run(args)
+    # current, peak = tracemalloc.get_traced_memory()
+    # print(f"Current memory usage: {current / 10**6} MB")
+    # print(f"Peak memory usage: {peak / 10**6} MB")

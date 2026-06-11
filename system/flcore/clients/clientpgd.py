@@ -55,10 +55,8 @@ class clientPGD(Client):
 
         max_local_epochs = self.local_epochs
         w_ref = torch.cat([p.data.view(-1) for p in self.model.parameters()], dim=0)
-        theta=torch.norm((w_ref-torch.randn_like(w_ref)),p=2)/1200
-        for i in range(9):
-            theta+=torch.norm((w_ref-torch.randn_like(w_ref)),p=2)/1200
-
+        theta=0.1 #cifar10 ----> 1  else 0.1   cifar100 true/false 0.08  
+        print("theta is ",theta)
         for epoch in range(max_local_epochs):
             for i, (x, y) in enumerate(self.train_loader):
                 if type(x) == type([]):
@@ -71,7 +69,7 @@ class clientPGD(Client):
                 loss = -self.loss(output, y)
                 self.optimizer_ul.zero_grad()
                 loss.backward()
-                torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=7.0)
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=15.0)
                 self.optimizer_ul.step()
 
                 w = torch.cat([p.data.view(-1) for p in self.model.parameters()], dim=0)
