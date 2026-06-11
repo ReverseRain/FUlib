@@ -106,20 +106,24 @@ class FedOSD(Server):
             model = copy.deepcopy(self.global_model)
             gm = torch.cat([p.view(-1) for p in self.global_model.parameters()], dim=0)  
 
-            for client in self.unlearning_clients:
-                client.unlearning_train()
-            # self.unlearning_noise(model)
+            blind = self.args.one_shot and i!=0
+            if(not blind):
+                for client in self.unlearning_clients:
+                    client.unlearning_train()
+            elif blind and self.args.w_FoiseFU:
+                self.unlearning_noise(model)
+
             for client in self.selected_clients:
                 client.train()
             
             
             # 记录遗忘梯度的方向
-            
-            self.unlearning_grad = torch.zeros_like(gm)
-            self.receive_models_target()
-            for weights in self.uploaded_models:
-                pm=torch.cat([p.view(-1) for p in weights.parameters()], dim=0) 
-                self.unlearning_grad+=(pm-gm)/len(self.uploaded_models)
+            if(not blind or (blind and self.args.w_FoiseFU)):
+                self.unlearning_grad = torch.zeros_like(gm)
+                self.receive_models_target()
+                for weights in self.uploaded_models:
+                    pm=torch.cat([p.view(-1) for p in weights.parameters()], dim=0) 
+                    self.unlearning_grad+=(pm-gm)/len(self.uploaded_models)
 
             # 记录正常用户更新的方向
             self.normal_grad=[]

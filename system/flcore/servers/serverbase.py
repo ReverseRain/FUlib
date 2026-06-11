@@ -801,6 +801,67 @@ class Server(object):
         print("l2_distances ",l2_distances)
         return
 
+
+    def unlearning_noise(self,ref_model):
+        noise_loader = self.get_pure_noise()
+
+        criterion = nn.CrossEntropyLoss()
+        self.global_model.train()
+        
+        mean = torch.tensor([0.5, 0.3, 0.7]).view(3, 1, 1).expand(3, 32, 32)
+        mean_list = [(mean*i-0.5)/0.5 for i in range(self.num_classes)]
+        means = torch.stack(mean_list).to(self.device)
+
+        for i, (x, y) in enumerate(noise_loader):
+            if type(x) == type([]):
+                x[0] = x[0].to(self.device)
+            else:
+                x = x.to(self.device)
+            y = y.to(self.device)
+            
+            output = self.global_model(x) 
+
+            loss = criterion(output, y)
+            # batch_means = means[y]
+            # distance_sq = torch.sum((x - batch_means) ** 2, dim=(1, 2, 3))
+
+            # loss = (criterion(output, y) * (1.0 / (distance_sq + 1e-4))).mean()
+
+            gm = torch.cat([p.data.view(-1) for p in self.global_model.base.parameters()], dim=0)
+            pm = torch.cat([p.data.view(-1) for p in ref_model.base.parameters()], dim=0)
+            loss += torch.norm(gm-pm, p=2) * 0.1
+
+            self.opt_ul.zero_grad()
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(self.global_model.parameters(), max_norm=5.0)
+            self.opt_ul.step()
+        self.send_models_target()
+    def get_pure_noise(self):
+        x_all=[]
+        y_all=[]
+
+        means = torch.tensor([0.5, 0.3, 0.7]).view(3, 1, 1)
+        stds = torch.tensor([0.3, 0.2, 0.65]).view(3, 1, 1)
+        
+        u_list = [means*i for i in range(self.num_classes)]
+        
+        
+        dataset_size = len(self.unlearning_clients[0].train_loader.dataset)
+        for _ in range(dataset_size):
+            i = random.randint(0, self.num_classes - 1)
+            u = u_list[i]
+            noise = torch.randn((3,32,32)) * stds + u
+            y_all.append(torch.tensor(i))
+            x_all.append(noise.unsqueeze(0))
+
+        x_all = torch.cat(x_all, dim=0)
+        y_all = torch.tensor(y_all)
+        x_all = (x_all - 0.5) / 0.5
+
+
+        noise_data=[(x,y) for x,y in zip(x_all,y_all)]
+        
+        return DataLoader(noise_data, self.batch_size, drop_last=True, shuffle=True)
     
     def post_learning_noise(self):
         self.clients = [client for client in self.clients if client not in self.unlearning_clients]

@@ -145,8 +145,10 @@ def run(arg):
         
         if(args.post_training_ground!=0):
             print(f"\n============= Post-training start =============")
-            # server.post_training(m)
-            server.post_learning_noise()
+            if(args.w_FoiseFU!=True):
+                server.post_training(m)
+            else:
+                server.post_learning_noise()
 
 
     elif(args.learning_state=="retrain"):
@@ -157,10 +159,6 @@ def run(arg):
     else:
         server.global_model=torch.load("models_seed42_resnet/Cifar10_test_2/retrain_model_.pt",map_location=server.device,weights_only=False)
         server.send_models()
-        # server.attacker=train_attack_model(server.global_model,
-        #                                    server.clients,server.num_classes,server.device)
-        # attacker_path=os.path.join("models_seed47/Cifar10_test",("Backdoor_" if server.args.attack=='True' else "noBackdoor_") + "xgb_model.bin")
-        # server.attacker.save_model(attacker_path)
         server.evaluate()
         
     print("All done!")
@@ -240,6 +238,8 @@ if __name__ == "__main__":
     parser.add_argument('-tem', "--temperature", type=float, default=3)
     parser.add_argument('-seed', "--seed_num", type=int, default=42)
     parser.add_argument('-noise', "--noise_type", type=str, default="pure_noise")
+    parser.add_argument('-wNoise', "--w_FoiseFU", type=bool, default=False)
+    parser.add_argument('-os', "--one_shot", type=bool, default=False)
     args = parser.parse_args()
 
     os.environ["CUDA_VISIBLE_DEVICES"] = args.device_id
