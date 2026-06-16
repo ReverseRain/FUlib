@@ -122,6 +122,7 @@ class FedNoise(Server):
                 c.model = copy.deepcopy(self.global_model)
             if(i==0):
                 self.warm_up()
+                # self.draw_tsne("tsne_before_unlearning.png")
             self.evaluate()
             
             for _, (x, y) in enumerate(noise_loader):
@@ -163,7 +164,8 @@ class FedNoise(Server):
         print("MIA Attacker to unlearning model precision = {:.4f}".format(PRE_unlearning))
         print("MIA Attacker to unlearning model recall = {:.4f}".format(REC_unlearning))
         self.save_unlearning(PRE_unlearning)
-        # self.cka_analyse()
+        # self.draw_tsne("tsne_after_unlearning_NoiseFU.png")
+        self.cka_analyse()
 
     
     def get_class_noise(self):

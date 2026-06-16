@@ -8,7 +8,7 @@ import copy
 import time
 import random
 import json
-from utils.data_utils import read_client_data
+from utils.data_utils import backdoor_pattern, read_client_data
 from utils.dlg import DLG
 from utils.attack_utils import attack,train_attack_model
 import matplotlib.pyplot as plt
@@ -17,6 +17,7 @@ import pandas as pd
 import math
 import torch.nn as nn
 from torch.utils.data import DataLoader
+from sklearn.manifold import TSNE
 
 
 class Server(object):
@@ -712,7 +713,7 @@ class Server(object):
         # model_path = os.path.join(model_path, ((''.join(map(str, self.args.unlearning_clients)) + 
         #                               "_attack_server" ) if self.args.attack=='True' else "_server") + ".pt")
         # model2 = torch.load(model_path, map_location='cuda' if torch.cuda.is_available() else 'cpu',weights_only=False)
-        model2 = copy.deepcopy(self.clients[1].model)
+        model2 = copy.deepcopy(self.global_model)
 
         model1.eval()
         model2.eval()
@@ -946,18 +947,103 @@ class Server(object):
         for w, client_model in zip(self.uploaded_weights, self.uploaded_models):
             self.add_parameters(w, client_model)
 
-    def draw_tsne(self):
+    def draw_tsne(self,name):
+        features = []
+        labels = []
+        feat_A, label_A = [], []
+        feat_B, label_B = [], []
         for c in self.clients:
             c.model.eval()
-            for i, (x, y) in enumerate(c.train_loader):
-                if type(x) == type([]):
-                    x[0] = x[0].to(self.device)
-                else:
-                    x = x.to(self.device)
-                y = y.to(self.device)
-                
-                output = c.model.base(x)
-                
+            with torch.no_grad():
+                for i, (x, y) in enumerate(c.train_loader):
+                    if type(x) == type([]):
+                        x[0] = x[0].to(self.device)
+                    else:
+                        x = x.to(self.device)
+                    
+                    feat = c.model.base(x)
+                    feat_A.append(feat.cpu().numpy())
+                    label_A.append(y.numpy())
+                    if i > 20:
+                        break
+
+        feat_A = np.concatenate(feat_A, axis=0)
+        label_A = np.concatenate(label_A, axis=0)
+        
         for c in self.unlearning_clients:
             c.model.eval()
+            test_data = read_client_data("Cifar10", 1, is_train=False)
+            class_1 = [(x, y) for x, y in test_data if y == 1][:200]
+            poison_x = backdoor_pattern([
+                x for x, y in class_1 
+            ])
+            poison_y=[0 for _ in poison_x]
+
+            poison_data=[(x,y) for x,y in zip(poison_x,poison_y)]
+            dataloader1 = DataLoader(poison_data, 32, drop_last=True, shuffle=False)
+            
+            with torch.no_grad():
+                for i, (x, y) in enumerate(dataloader1):
+                    if type(x) == type([]):
+                        x[0] = x[0].to(self.device)
+                    else:
+                        x = x.to(self.device)
+                    
+                    feat = c.model.base(x)
+                    feat_B.append(feat.cpu().numpy())
+                    label_B.append(y.numpy())
+
+                    if i > 150:
+                        break
+
+        feat_B = np.concatenate(feat_B, axis=0)
+        label_B = np.concatenate(label_B, axis=0)
+
+        features = np.concatenate([feat_A, feat_B], axis=0)
+        print("finish collect features")
+
+        tsne = TSNE(
+            n_components=2,
+            perplexity=30,        # 关键参数，根据数据调整
+            learning_rate='auto',    # 样本量大时调高
+            n_iter=2100,
+            random_state=42,      # 固定随机种子
+            early_exaggeration = 72.0,
+            init='pca'            # 初始化用 PCA，比随机初始化更稳定
+        )
+
+        tsne_result = tsne.fit_transform(features)
+        print("finish tsne Doing !")
+
+        n_A = len(feat_A)
+        n_B = len(feat_B)
+        tsne_A = tsne_result[:n_A]
+        tsne_B = tsne_result[n_A:n_A+n_B]
+
+        label_list = [0,1,2,3]
+        colors = ["#AFBB0D","#40ef7d","#23D7D4",'#F5B482',"#430CDB",'#6ec3f7',"#6ef7de","#c06ef7","#e58443","#4B4A76"]
+
+        plt.figure(figsize=(10, 8))
+
+        for label in label_list:
+            plt.scatter(
+                tsne_A[label_A == label, 0][:200],
+                tsne_A[label_A == label, 1][:200],
+                c=colors[label],
+                marker='o',      # label 0
+                label='Norm DataLoader - Label '+str(label)
+            )
+        
+        plt.scatter(
+            tsne_B[label_B == 0, 0][:200],
+            tsne_B[label_B == 0, 1][:200],
+            c='#ea5c5c',
+            marker='s',      # label 0
+            label='Posion DataLoader - Label '+str(1)
+        )
+        
+        
+        plt.legend()
+        plt.title("t-SNE")
+        plt.savefig(name)
         return

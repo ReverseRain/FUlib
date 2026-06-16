@@ -152,6 +152,7 @@ class FedOSD(Server):
         print("MIA Attacker to unlearning model recall = {:.4f}".format(REC_unlearning))
         self.save_unlearning(PRE_unlearning)
         self.cka_analyse()
+        # self.draw_tsne("tsne_after_unlearning_FedOSD.png")
         
     
     def get_nearest_oth_d(self, gr_locals, gu):
