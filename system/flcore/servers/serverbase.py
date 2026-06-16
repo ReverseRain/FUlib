@@ -607,8 +607,6 @@ class Server(object):
             self.selected_clients = self.select_clients()
             self.send_models()
             self.send_models_target()
-            if(i==0):
-                self.warm_up()
             
             print(f"\n-------------Round number: {i}-------------")
             print("\nEvaluate global model")
@@ -710,10 +708,11 @@ class Server(object):
         # dataloader = self.clients[1].test_loader
         # model1 = copy.deepcopy(self.unlearning_clients[0].model)
         model1 = copy.deepcopy(self.global_model)
-        model_path = os.path.join("models_seed"+str(self.args.seed_num)+"_resnet", self.dataset)
-        model_path = os.path.join(model_path, ((''.join(map(str, self.args.unlearning_clients)) + 
-                                      "_attack_server" ) if self.args.attack=='True' else "_server") + ".pt")
-        model2 = torch.load(model_path, map_location='cuda' if torch.cuda.is_available() else 'cpu',weights_only=False)
+        # model_path = os.path.join("models_seed"+str(self.args.seed_num)+"_resnet", self.dataset)
+        # model_path = os.path.join(model_path, ((''.join(map(str, self.args.unlearning_clients)) + 
+        #                               "_attack_server" ) if self.args.attack=='True' else "_server") + ".pt")
+        # model2 = torch.load(model_path, map_location='cuda' if torch.cuda.is_available() else 'cpu',weights_only=False)
+        model2 = copy.deepcopy(self.clients[1].model)
 
         model1.eval()
         model2.eval()
@@ -744,6 +743,7 @@ class Server(object):
         cka.compare(dataloader)
         cka.plot_results(save_path="specified_layers_cka_"+self.algorithm+".png")
         cka_matrix = cka.export()['CKA']  # 或 cka_matrix = cka.CKA_matrix
+        print('cka_matrix ',cka_matrix)
         diagonal_values = cka_matrix.diagonal()
         print('diagonal_values ',diagonal_values)
         layers = ['layer1','layer2','layer3','layer4','head']
@@ -945,3 +945,19 @@ class Server(object):
 
         for w, client_model in zip(self.uploaded_weights, self.uploaded_models):
             self.add_parameters(w, client_model)
+
+    def draw_tsne(self):
+        for c in self.clients:
+            c.model.eval()
+            for i, (x, y) in enumerate(c.train_loader):
+                if type(x) == type([]):
+                    x[0] = x[0].to(self.device)
+                else:
+                    x = x.to(self.device)
+                y = y.to(self.device)
+                
+                output = c.model.base(x)
+                
+        for c in self.unlearning_clients:
+            c.model.eval()
+        return

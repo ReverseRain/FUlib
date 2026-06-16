@@ -61,9 +61,9 @@ class Client(object):
         self.optimizer = torch.optim.SGD(self.model.parameters(), lr=self.learning_rate)
         # self.optimizer = torch.optim.SGD(self.model.parameters(), lr=self.learning_rate
         #                                  ,momentum=0.9,weight_decay=0.0005)
-        # self.optimizer_ul = torch.optim.SGD(self.model.parameters(), lr=args.unlearning_rate)
-        self.optimizer_ul = torch.optim.SGD(self.model.parameters(), lr=self.unlearning_rate
-                                         ,momentum=0.9,weight_decay=0.0005)
+        self.optimizer_ul = torch.optim.SGD(self.model.parameters(), lr=args.unlearning_rate)
+        # self.optimizer_ul = torch.optim.SGD(self.model.parameters(), lr=self.unlearning_rate
+        #                                  ,momentum=0.9,weight_decay=0.0005)
         self.learning_rate_scheduler = torch.optim.lr_scheduler.ExponentialLR(
             optimizer=self.optimizer, 
             gamma=args.learning_rate_decay_gamma

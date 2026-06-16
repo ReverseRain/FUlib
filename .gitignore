@@ -1,5 +1,9 @@
-system/**
-!system/**/
+.idea/
+**/__pycache__/
+
+system/*
+!system/flcore/
+!system/utils/
 !system/main.py
 
 dataset/**
@@ -9,38 +13,14 @@ dataset/*/
 !dataset/utils/
 !dataset/utils/**
 
-.idea/
-__pycache__/
 
 /dataset/Cifar100/
 /results
 /system/models_*
-/dataset/Cifar10/
-/dataset/Cifar10_noniid/
-/dataset/Cifar100_noniid/
-/dataset/Cifar100_test_2/
-/dataset/Cifar10_test_2/
-/dataset/Cifar10_test/
 /system/job_out_*
-/system/melt.sh
-/system/submit_cifar100.sh
-/system/submit.sh
-/system/submit2.sh
 /system/*.sh
 /system/loss_img
-/system/drawresult.py
-/system/model_explore.py
+
 /dataset/submit.sh
-/system/*.ipynb
-/system/*.out
-/system/*.sh
-/dataset/*.out
-/system/log_out
-/system/cifar10*
-/system/resnet/
-/system/client50/
-/system/unlearning/
-/system/unconverged/
-/system/resnet*
-/dataset/Cifar10*
+
 

@@ -17,8 +17,8 @@ from flcore.servers.servergs import FedGS
 from flcore.servers.servereraser import FedEraser
 from flcore.servers.serverrful import FedRFUL
 
-from FUlib.system.flcore.servers.serverFeatNoise import FedFeatNoise
-from FUlib.system.flcore.servers.serverNoise import FedNoise
+from flcore.servers.serverFeatNoise import FedFeatNoise
+from flcore.servers.serverNoise import FedNoise
 from flcore.servers.servernot import FedNOT
 
 
