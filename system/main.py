@@ -53,30 +53,6 @@ def run(arg):
         elif "Cifar10" in args.dataset:
             args.model = torchvision.models.resnet18(pretrained=True, num_classes=1000).to(args.device)
             args.model.fc = torch.nn.Linear(args.model.fc.in_features, args.num_classes).to(args.device)
-
-            # unlearning 阶段不要加载预训练权重
-            # 1. 动态控制预训练权重的行为
-            # if args.learning_state == "unlearning" or args.learning_state == "evaluation":
-            #     # Unlearning/评估阶段：不加载预训练权重
-            #     args.model = torchvision.models.resnet18(
-            #         pretrained=False,
-            #         num_classes=1000  # 注意：这里还是 1000
-            #     ).to(args.device)
-            # else:
-            #     # Learning 阶段：加载预训练权重
-            #     args.model = torchvision.models.resnet18(
-            #         pretrained=True,
-            #         num_classes=1000
-            #     ).to(args.device)
-            #
-            # # 两个阶段都执行相同的 fc 层替换
-            # args.model.fc = torch.nn.Linear(
-            #     args.model.fc.in_features,
-            #     args.num_classes
-            # ).to(args.device)
-
-
-
     elif model_str == "resnet34":
         if "Cifar100" in args.dataset:
             args.model = torchvision.models.resnet34(pretrained=True, num_classes=1000).to(args.device)
