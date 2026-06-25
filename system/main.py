@@ -15,19 +15,19 @@ from flcore.servers.serverpgd import FedPGD
 from flcore.servers.serverosd import FedOSD
 from flcore.servers.servergs import FedGS
 from flcore.servers.servereraser import FedEraser
-from flcore.servers.serverjellyfish import Jellyfish
-# from flcore.servers.serverrful import FedRFUL
+from flcore.servers.serverrful import FedRFUL
 
-# from FUlib.system.flcore.servers.serverFeatNoise import FedFeatNoise
-# from FUlib.system.flcore.servers.serverNoise import FedNoise
-# from flcore.servers.servernot import FedNOT
+from flcore.servers.serverFeatNoise import FedFeatNoise
+from flcore.servers.serverNoise import FedNoise
+from flcore.servers.servernot import FedNOT
+from flcore.servers.serverjellyfish import Jellyfish
 
 
 def run(arg):
     time_list = []
     model_str = args.model
 
-
+    
 
     if model_str == "cnn": # ]
         if "MNIST" in args.dataset:
@@ -46,38 +46,14 @@ def run(arg):
             args.model = DNN(3*32*32, 100, num_classes=args.num_classes).to(args.device)
         else:
             args.model = DNN(60, 20, num_classes=args.num_classes).to(args.device)
-    elif model_str == "resnet":
+    elif model_str == "resnet": 
         if "Cifar100" in args.dataset:
             args.model = torchvision.models.resnet18(pretrained=True, num_classes=1000).to(args.device)
             args.model.fc = torch.nn.Linear(args.model.fc.in_features, args.num_classes).to(args.device)
         elif "Cifar10" in args.dataset:
             args.model = torchvision.models.resnet18(pretrained=True, num_classes=1000).to(args.device)
             args.model.fc = torch.nn.Linear(args.model.fc.in_features, args.num_classes).to(args.device)
-
-            # unlearning 阶段不要加载预训练权重
-            # 1. 动态控制预训练权重的行为
-            # if args.learning_state == "unlearning" or args.learning_state == "evaluation":
-            #     # Unlearning/评估阶段：不加载预训练权重
-            #     args.model = torchvision.models.resnet18(
-            #         pretrained=False,
-            #         num_classes=1000  # 注意：这里还是 1000
-            #     ).to(args.device)
-            # else:
-            #     # Learning 阶段：加载预训练权重
-            #     args.model = torchvision.models.resnet18(
-            #         pretrained=True,
-            #         num_classes=1000
-            #     ).to(args.device)
-            #
-            # # 两个阶段都执行相同的 fc 层替换
-            # args.model.fc = torch.nn.Linear(
-            #     args.model.fc.in_features,
-            #     args.num_classes
-            # ).to(args.device)
-
-
-
-    elif model_str == "resnet34":
+    elif model_str == "resnet34": 
         if "Cifar100" in args.dataset:
             args.model = torchvision.models.resnet34(pretrained=True, num_classes=1000).to(args.device)
             args.model.fc = torch.nn.Linear(args.model.fc.in_features, args.num_classes).to(args.device)
@@ -133,28 +109,28 @@ def run(arg):
         args.model.fc = nn.Identity()
         args.model = BaseHeadSplit(args.model, args.head)
         server = Jellyfish(args)
-    # elif args.algorithm == "RFUL":
-    #     args.head = copy.deepcopy(args.model.fc)
-    #     args.model.fc = nn.Identity()
-    #     args.model = BaseHeadSplit(args.model, args.head)
-    #     server = FedRFUL(args)
-    # elif args.algorithm == "FedNoise":
-    #     args.head = copy.deepcopy(args.model.fc)
-    #     args.model.fc = nn.Identity()
-    #     args.model = BaseHeadSplit(args.model, args.head)
-    #     server = FedNoise(args)
-    # elif args.algorithm == "FedFeatNoise":
-    #     args.head = copy.deepcopy(args.model.fc)
-    #     args.model.fc = nn.Identity()
-    #     args.model = BaseHeadSplit(args.model, args.head)
-    #     server = FedFeatNoise(args)
-    # elif args.algorithm == "NoT":
-    #     args.head = copy.deepcopy(args.model.fc)
-    #     args.model.fc = nn.Identity()
-    #     args.model = BaseHeadSplit(args.model, args.head)
-    #     server = FedNOT(args)
-
-
+    elif args.algorithm == "RFUL":
+        args.head = copy.deepcopy(args.model.fc)
+        args.model.fc = nn.Identity()
+        args.model = BaseHeadSplit(args.model, args.head)
+        server = FedRFUL(args)
+    elif args.algorithm == "FedNoise":
+        args.head = copy.deepcopy(args.model.fc)
+        args.model.fc = nn.Identity()
+        args.model = BaseHeadSplit(args.model, args.head)
+        server = FedNoise(args)
+    elif args.algorithm == "FedFeatNoise":
+        args.head = copy.deepcopy(args.model.fc)
+        args.model.fc = nn.Identity()
+        args.model = BaseHeadSplit(args.model, args.head)
+        server = FedFeatNoise(args)
+    elif args.algorithm == "NoT":
+        args.head = copy.deepcopy(args.model.fc)
+        args.model.fc = nn.Identity()
+        args.model = BaseHeadSplit(args.model, args.head)
+        server = FedNOT(args)
+    
+            
     if(args.learning_state=="learning"):
         print(f"\n============= Training start =============")
         print("Creating server and clients ...")
@@ -171,29 +147,24 @@ def run(arg):
     elif(args.learning_state=="unlearning"):
         m = torch.cat([p.view(-1) for p in server.global_model.parameters()], dim=0)
         print(f"\n============= Unlearning start =============")
-
+        
         server.unlearning()
-
+        
         if(args.post_training_ground!=0):
             print(f"\n============= Post-training start =============")
             if(args.w_FoiseFU!=True):
                 server.post_training(m)
-            else:
+            elif(args.w_FoiseFU!=True):
                 server.post_learning_noise()
 
 
     elif(args.learning_state=="retrain"):
         print(f"\n============= Retrain start =============")
-
+        
         server.clients = [client for client in server.clients if client not in server.unlearning_clients]
         server.train()
-    else:
-        server.global_model=torch.load("models_seed42_resnet/Cifar10_test_2/retrain_model_.pt",map_location=server.device,weights_only=False)
-        server.send_models()
-        server.evaluate()
 
     print("All done!")
-
 
 
 if __name__ == "__main__":
@@ -201,7 +172,7 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
 
-    parser.add_argument('-go', "--goal", type=str, default="test",
+    parser.add_argument('-go', "--goal", type=str, default="test", 
                         help="The goal for this experiment")
     parser.add_argument('-dev', "--device", type=str, default="cuda",
                         choices=["cpu", "cuda"])
@@ -215,7 +186,7 @@ if __name__ == "__main__":
     parser.add_argument('-ld', "--learning_rate_decay", type=bool, default=False)
     parser.add_argument('-ldg', "--learning_rate_decay_gamma", type=float, default=0.99)
     parser.add_argument('-gr', "--global_rounds", type=int, default=2000)
-    parser.add_argument('-ls', "--local_epochs", type=int, default=1,
+    parser.add_argument('-ls', "--local_epochs", type=int, default=1, 
                         help="Multiple update steps in one local epoch.")
     parser.add_argument('-algo', "--algorithm", type=str, default="FedAvg")
     parser.add_argument('-jr', "--join_ratio", type=float, default=1.0,
@@ -238,7 +209,7 @@ if __name__ == "__main__":
     parser.add_argument('-nnc', "--num_new_clients", type=int, default=0)
     parser.add_argument('-ften', "--fine_tuning_epoch_new", type=int, default=0)
     parser.add_argument('-fd', "--feature_dim", type=int, default=512)
-    parser.add_argument('-vs', "--vocab_size", type=int, default=32000,
+    parser.add_argument('-vs', "--vocab_size", type=int, default=32000, 
                         help="Set this for text tasks. 80 for Shakespeare. 32000 for AG_News and SogouNews.")
     parser.add_argument('-ml', "--max_len", type=int, default=200)
     # practical
@@ -252,7 +223,7 @@ if __name__ == "__main__":
                         help="Whether to group and select clients at each round according to time cost")
     parser.add_argument('-tth', "--time_threthold", type=float, default=10000,
                         help="The threthold for droping slow clients")
-
+    
 
     parser.add_argument("-uc","--unlearning_clients", nargs='+', type=int,default=None,
                          help='an array of integers')
@@ -271,7 +242,8 @@ if __name__ == "__main__":
     parser.add_argument('-noise', "--noise_type", type=str, default="pure_noise")
     parser.add_argument('-wNoise', "--w_FoiseFU", type=bool, default=False)
     parser.add_argument('-os', "--one_shot", type=bool, default=False)
-    # Jellyfish 噪声生成参数
+    parser.add_argument('-ar', "--access_rounds", type=int, default=0)
+     # Jellyfish 噪声生成参数
     # 代理数据集生成
     parser.add_argument('-ns', "--noise_steps", type=int, default=200,
                         help='Noise optimization steps for Jellyfish (E_no)')
@@ -284,15 +256,7 @@ if __name__ == "__main__":
                         help='Number of epochs for server-side disentanglement tuning (论文默认 5)') # dis_epoch设置为0关闭知识解耦
     parser.add_argument('-unlearn_rate', type=float, default=0.005,
                         help='Learning rate for joint multi-objective unlearning optimization')
-
-
-
-
-
-
-
-
-
+    
     args = parser.parse_args()
 
     os.environ["CUDA_VISIBLE_DEVICES"] = args.device_id
@@ -305,8 +269,8 @@ if __name__ == "__main__":
         print(arg, '=',getattr(args, arg))
     print("=" * 50)
 
-    torch.manual_seed(args.seed_num)
-    torch.cuda.manual_seed(args.seed_num)
+    torch.manual_seed(args.seed_num)           
+    torch.cuda.manual_seed(args.seed_num)      
     torch.cuda.manual_seed_all(args.seed_num)
     # tracemalloc.start()
 
@@ -314,7 +278,7 @@ if __name__ == "__main__":
     #     activities=[
     #         torch.profiler.ProfilerActivity.CPU,
     #         torch.profiler.ProfilerActivity.CUDA],
-    #     profile_memory=True,
+    #     profile_memory=True, 
     #     on_trace_ready=torch.profiler.tensorboard_trace_handler('./log')
     #     ) as prof:
     # with torch.autograd.profiler.profile(profile_memory=True) as prof:

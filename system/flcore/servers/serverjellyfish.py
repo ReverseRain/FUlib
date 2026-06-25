@@ -181,19 +181,19 @@ class Jellyfish(Server):
         """
         Jellyfish 遗忘主流程控制中心
         """
-        print("\n" + "=" * 50)
-        print("Initializing Jellyfish Unlearning Phase Flow...")
-        print("=" * 50)
+        # print("\n" + "=" * 50)
+        # print("Initializing Jellyfish Unlearning Phase Flow...")
+        # print("=" * 50)
 
         # 1. 调用基类内置方法全量重载大模型快照与攻击者模型
         self.load_model()
 
         # 2. 关键修复：先将最新的全局模型参数同步分发给所有的本地客户端
-        print("[Sync] 正在将重载的全局权重下发至各客户端实体...")
+        # print("[Sync] 正在将重载的全局权重下发至各客户端实体...")
         self.send_models()
 
         # 3. 关键修复：执行 warm_up，利用本地数据流冲刷并纠正各端 BN 层的 running_mean/var
-        print("[BN Warm-up] 对齐 BatchNorm 统计量...")
+        # print("[BN Warm-up] 对齐 BatchNorm 统计量...")
         self.warm_up()
 
         # 4. 关键保护：此时参数已完美对齐，锁死为评估模式准备纯推理测试
@@ -206,39 +206,40 @@ class Jellyfish(Server):
         self.original_model.eval()
 
         # 6. 当场测量 Utility 性能
-        print("\n[验证] 正在校验初始载入权重的 Utility 性能...")
+        # print("\n[验证] 正在校验初始载入权重的 Utility 性能...")
         self.evaluate()
 
 
         # # ====== 阶段①: 代理数据生成与服务器重洗整合 ======
-        print("\nPhase ①: Triggering Local Proxy Noise Generation & Server Assembly...")
+        # print("\nPhase ①: Triggering Local Proxy Noise Generation & Server Assembly...")
         self.collect_proxy_noise()
         #
         # # ====== 阶段②: 知识解耦 (论文 4.3 节核心) ======
-        print("\nPhase ②: Entering Server-Side Knowledge Disentanglement...")
+        # print("\nPhase ②: Entering Server-Side Knowledge Disentanglement...")
         self.fit_knowledge_disentanglement()
         # 监控点 1：测量知识解耦后的精度演进
         self.send_models()  # 必须先将解耦后的 base 层权重同步给客户端
         self.global_model.eval()
         for c in self.clients: c.model.eval()
-        print("\n>>> [测量 1] 阶段②知识解耦执行完成后测量结果:")
+        # print("\n>>> [测量 1] 阶段②知识解耦执行完成后测量结果:")
         self.evaluate()
         #
         # # ====== 阶段③: 多目标联合遗忘 (论文 4.4 节核心) ======
-        print("\nPhase ③: Entering Multi-Objective Joint Unlearning Trajectory...")
+        # print("\nPhase ③: Entering Multi-Objective Joint Unlearning Trajectory...")
         self.fit_joint_unlearning()
         # 监控点 2：测量执行完多目标冲突梯度消除后的精度演进
         self.send_models()  # 必须把阶段③手术修正后的参数灌入客户端
+        self.send_models_target() 
         self.global_model.eval()
         for c in self.clients: c.model.eval()
-        print("\n>>> [测量 2] 阶段③多目标联合遗忘执行完成后测量结果:")
+        # print("\n>>> [测量 2] 阶段③多目标联合遗忘执行完成后测量结果:")
         self.evaluate()
         #
         # # ====== 阶段④: 零样本模型修复 (严格对齐论文 4.5 节) ======
-        print("\nPhase ④: Entering Zero-Shot Adaptive Model Repair Stage...")
+        # print("\nPhase ④: Entering Zero-Shot Adaptive Model Repair Stage...")
         self.adaptive_model_repair()
 
-        print("\n[Final Sync] 整个 Jellyfish 框架全量演进结束，正在同步最终模型...")
+        # print("\n[Final Sync] 整个 Jellyfish 框架全量演进结束，正在同步最终模型...")
         self.send_models()
         self.send_models_target()
 
@@ -261,9 +262,9 @@ class Jellyfish(Server):
         print("MIA Attacker to unlearning model precision = {:.4f}".format(PRE_unlearning))
         print("MIA Attacker to unlearning model recall = {:.4f}".format(REC_unlearning))
         self.save_unlearning(PRE_unlearning)
-        print("\n" + "=" * 50)
-        print("[Jellyfish Final Flow Done] 逐步性能链条分析完毕。")
-        print("=" * 50)
+        # print("\n" + "=" * 50)
+        # print("[Jellyfish Final Flow Done] 逐步性能链条分析完毕。")
+        # print("=" * 50)
 
 
 
@@ -277,7 +278,7 @@ class Jellyfish(Server):
         client_labels_list = []
 
         for client in self.unlearning_clients:
-            print(f"[Server] Requesting proxy noise from Target Client {client.id}...")
+            # print(f"[Server] Requesting proxy noise from Target Client {client.id}...")
             noises, labels = client.generate_noise(
                 global_model=self.global_model,
                 steps=self.args.noise_steps,
@@ -287,7 +288,7 @@ class Jellyfish(Server):
             client_labels_list.append(labels)
 
             total_client_samples = sum([n.shape[0] for n in noises])
-            print(f"[Server] 接收成功：Client {client.id} 已成功上传 {total_client_samples} 个脱敏代理样本")
+            # print(f"[Server] 接收成功：Client {client.id} 已成功上传 {total_client_samples} 个脱敏代理样本")
 
         # 合并构建统一噪声矩阵集合 N_f (对应论文公式 4)
         self.aggregated_noises, self.aggregated_labels = aggregate_client_noises(
@@ -302,7 +303,7 @@ class Jellyfish(Server):
             shuffle=True
         )
 
-        print(f"[Server] Global Proxy Dataset N_f 串联组装完毕 (总样本数: {self.aggregated_noises.shape[0]}).")
+        # print(f"[Server] Global Proxy Dataset N_f 串联组装完毕 (总样本数: {self.aggregated_noises.shape[0]}).")
 
         # 固化备份
         save_path = f"proxy_noise_{self.dataset}_clients_{'_'.join(map(str, [c.id for c in self.unlearning_clients]))}.pt"
@@ -377,10 +378,10 @@ class Jellyfish(Server):
                 loss_all += loss_disentangle.item()
 
             mean_epoch_loss = loss_all / len(self.proxy_noise_loader)
-            print(f"    Epoch [{epoch + 1}/{self.dis_epochs}] - Disentangle Mean Loss: {mean_epoch_loss:.6f}")
+            # print(f"    Epoch [{epoch + 1}/{self.dis_epochs}] - Disentangle Mean Loss: {mean_epoch_loss:.6f}")
 
         hook_handle.remove()
-        print("  [Disentangle Engine] 知识解耦阶段完成。跨类别纠缠特征已被物理压制清零。")
+        # print("  [Disentangle Engine] 知识解耦阶段完成。跨类别纠缠特征已被物理压制清零。")
 
     def fit_joint_unlearning(self):
         """
@@ -401,7 +402,7 @@ class Jellyfish(Server):
             bad_teachers.append(teacher)
 
         # 2. 离线精准抽取敏感参数梯度，生产二值化梯度掩码 m_s (严格对齐公式 21)
-        print("  [Unlearn Engine] Pre-calculating binary gradient mask m_s...")
+        # print("  [Unlearn Engine] Pre-calculating binary gradient mask m_s...")
         gradient_mask = {}
         for name, param in self.global_model.named_parameters():
             gradient_mask[name] = torch.zeros_like(param.data)
@@ -431,7 +432,7 @@ class Jellyfish(Server):
         criterion_ce = nn.CrossEntropyLoss()
         criterion_kl = nn.KLDivLoss(reduction='batchmean')
 
-        print(f"  [Unlearn Engine] Running Joint Multi-Objective Unlearning for {self.unlearn_epochs} epochs...")
+        # print(f"  [Unlearn Engine] Running Joint Multi-Objective Unlearning for {self.unlearn_epochs} epochs...")
 
         self.global_model.train()
         for epoch in range(self.unlearn_epochs):
@@ -547,24 +548,24 @@ class Jellyfish(Server):
 
             mean_unlearn = loss_unlearn_all / len(self.proxy_noise_loader)
             mean_drift = loss_drift_all / len(self.proxy_noise_loader)
-            print(
-                f"    Epoch [{epoch + 1}/{self.unlearn_epochs}] - L_unlearn: {mean_unlearn:.4f} | L_drift: {mean_drift:.4f}")
+        #     print(
+        #         f"    Epoch [{epoch + 1}/{self.unlearn_epochs}] - L_unlearn: {mean_unlearn:.4f} | L_drift: {mean_drift:.4f}")
 
-        print("  [Unlearn Engine] 多目标联合遗忘训练完成。敏感贡献已被精准剥离。")
+        # print("  [Unlearn Engine] 多目标联合遗忘训练完成。敏感贡献已被精准剥离。")
 
     def adaptive_model_repair(self):
         """
         阶段④算法全量落地：严格执行论文 4.5 节设计的零样本修复策略。
         依据各正常客户端的测试准确率退化程度，自适应触发端侧本地保留噪声构建并执行公式(23)、(24)。
         """
-        print("  [Repair Stage] Assessing accuracy drop on remaining clients...")
+        # print("  [Repair Stage] Assessing accuracy drop on remaining clients...")
 
         # 1. 过滤识别出联邦网络中未参与遗忘的正常存留客户端集合 C_r
         forget_client_ids = [c.id for c in self.unlearning_clients]
         remaining_clients = [c for c in self.clients if c.id not in forget_client_ids]
 
         if len(remaining_clients) == 0:
-            print("  [Repair Skip] 服务器未检测到任何剩余客户端资产，无须执行性能修复。")
+            # print("  [Repair Skip] 服务器未检测到任何剩余客户端资产，无须执行性能修复。")
             return
 
         # 2. 依次评估各正常端在执行遗忘微调之后的性能降幅
@@ -587,13 +588,13 @@ class Jellyfish(Server):
             post_acc = (ct_post * 1.0) / ns_post if ns_post > 0 else 0.0
 
             acc_drop = pre_acc - post_acc
-            print(
-                f"    - Client {client.id}: Pre-Acc = {pre_acc * 100:.2f}%, Post-Acc = {post_acc * 100:.2f}%, Drop = {acc_drop * 100:.2f}%")
+            # print(
+            #     f"    - Client {client.id}: Pre-Acc = {pre_acc * 100:.2f}%, Post-Acc = {post_acc * 100:.2f}%, Drop = {acc_drop * 100:.2f}%")
 
             # 严格对齐论文4.5节触发准则：如果测试准确率下降超过预定义阈值 \delta
             if acc_drop > self.delta_threshold:
-                print(
-                    f"      >>> [Triggered] 精度损伤达 {acc_drop * 100:.2f}% (>{self.delta_threshold * 100}%)，下发修复噪声命令...")
+                # print(
+                #     f"      >>> [Triggered] 精度损伤达 {acc_drop * 100:.2f}% (>{self.delta_threshold * 100}%)，下发修复噪声命令...")
                 # 客户端在本地按保留类别分布定制生成保留代理噪声 N_r^i
                 r_noise, r_label = client.generate_retention_noise(global_model=self.global_model)
                 triggered_client_noises.append(r_noise)
@@ -603,11 +604,11 @@ class Jellyfish(Server):
 
         # 3. 严格执行公式 (23)：如果存在触发端，对其上报的保留噪声数据集取并集进行聚合
         if len(triggered_client_noises) == 0:
-            print("  [Repair Skip] 正常客户端未发生严重性能受损，模型修复流自适应熔断。")
+            # print("  [Repair Skip] 正常客户端未发生严重性能受损，模型修复流自适应熔断。")
             return
 
-        print(
-            f"  [Repair Engine] Aggregating {len(triggered_client_noises)} clients' retention datasets via Eq.(23)...")
+        # print(
+        #     f"  [Repair Engine] Aggregating {len(triggered_client_noises)} clients' retention datasets via Eq.(23)...")
         # 合并构建统一的全局保留噪声数据集 \mathcal{N}_r
         aggregated_r_noises = torch.cat(triggered_client_noises, dim=0)
         aggregated_r_labels = torch.cat(triggered_client_labels, dim=0)
@@ -618,8 +619,8 @@ class Jellyfish(Server):
             shuffle=True,
             drop_last=False
         )
-        print(
-            f"  [Repair Engine] Global Retention dataset \\mathcal{{N}}_r created (Total size: {aggregated_r_noises.shape[0]})")
+        # print(
+        #     f"  [Repair Engine] Global Retention dataset \\mathcal{{N}}_r created (Total size: {aggregated_r_noises.shape[0]})")
 
         # 4. 严格执行公式 (24)：使用交叉熵损失函数对遗忘后的模型进行知识回填微调
         # optimizer_repair = torch.optim.Adam(self.global_model.parameters(), lr=self.repair_lr)
@@ -632,7 +633,7 @@ class Jellyfish(Server):
         )
         criterion_repair = nn.CrossEntropyLoss()
 
-        print(f"  [Repair Tuning] Fine-tuning the global model for {self.repair_epochs} epochs...")
+        # print(f"  [Repair Tuning] Fine-tuning the global model for {self.repair_epochs} epochs...")
         self.global_model.train()
 
         for rep_epoch in range(self.repair_epochs):
@@ -651,7 +652,7 @@ class Jellyfish(Server):
 
                 loss_rep_total += loss_repair.item()
 
-            print(
-                f"    Repair Epoch [{rep_epoch + 1}/{self.repair_epochs}] - L_repair Loss: {loss_rep_total / len(self.repair_noise_loader):.6f}")
+        #     print(
+        #         f"    Repair Epoch [{rep_epoch + 1}/{self.repair_epochs}] - L_repair Loss: {loss_rep_total / len(self.repair_noise_loader):.6f}")
 
-        print("  [Repair Engine] 零样本模型修复微调结束。丢失的正常域泛化能力成功回填。")
+        # print("  [Repair Engine] 零样本模型修复微调结束。丢失的正常域泛化能力成功回填。")

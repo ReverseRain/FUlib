@@ -105,12 +105,12 @@ class FedNoise(Server):
 
         model = copy.deepcopy(self.global_model)
         mean = torch.tensor([0.5, 0.3, 0.7]).view(3, 1, 1).expand(3, 32, 32)
-        mean_list = [(mean*i-0.5)/0.5 for i in range(self.num_classes)]
+        mean_list = [(mean*(10-i)-0.5)/0.5 for i in range(self.num_classes)]
         means = torch.stack(mean_list).to(self.device)
         self.global_model.train()
 
         # lamda = 0.005
-        lamda = 0.005 
+        lamda = 0.008 
         for i in range(self.unlearning_ground+1):
             s_t = time.time()
             self.selected_clients = self.select_clients()
@@ -122,7 +122,7 @@ class FedNoise(Server):
                 c.model = copy.deepcopy(self.global_model)
             if(i==0):
                 self.warm_up()
-                # self.draw_tsne("tsne_before_unlearning.png")
+                self.draw_tsne("tsne_before_unlearning_noise3.png")
             self.evaluate()
             
             for _, (x, y) in enumerate(noise_loader):
@@ -164,8 +164,8 @@ class FedNoise(Server):
         print("MIA Attacker to unlearning model precision = {:.4f}".format(PRE_unlearning))
         print("MIA Attacker to unlearning model recall = {:.4f}".format(REC_unlearning))
         self.save_unlearning(PRE_unlearning)
-        # self.draw_tsne("tsne_after_unlearning_NoiseFU.png")
-        self.cka_analyse()
+        self.draw_tsne("tsne_after_unlearning_NoiseFU_noise3.png")
+        # self.cka_analyse()
 
     
     def get_class_noise(self):
@@ -218,13 +218,13 @@ class FedNoise(Server):
         # stds = torch.tensor([0.3, 0.2, 0.65]).view(3, 1, 1)
         stds = torch.tensor([0.25, 0.25, 0.45]).view(3, 1, 1)
 
-        u_list = [i * means for i in range(self.num_classes)]
+        u_list = [(10-i) * means for i in range(self.num_classes)]
         # u_list = [means for i in range(self.num_classes)]
         
         
         dataset_size = len(self.unlearning_clients[0].train_loader.dataset)
         for _ in range(dataset_size):
-            i = random.randint(1, self.num_classes - 1)
+            i = random.randint(0, self.num_classes - 1)
             u = u_list[i]
             noise = torch.randn((3,32,32)) * stds + u
             y_all.append(torch.tensor(i))

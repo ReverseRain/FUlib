@@ -318,12 +318,12 @@ class Server(object):
                 losses.append(cl*1.0)
                 retain_acc.append(ct*1.0)
                 retain_num_sample.append(ns)
-            else:
-                cl, ns, ct= c.train_metrics()
-                num_samples.append(ns)
-                losses.append(cl*1.0)
-                forget_acc.append(ct*1.0)
-                forget_num_sample.append(ns)
+        
+        for c in self.unlearning_clients:
+            cl, ns, ct= c.train_metrics()
+
+            forget_acc.append(ct*1.0)
+            forget_num_sample.append(ns)
 
         ids = [c.id for c in self.clients]
 
@@ -365,10 +365,10 @@ class Server(object):
         print("Averaged Train Loss: {:.4f}".format(train_loss))
         print("Averaged Test Accurancy: {:.4f}".format(test_acc))
         print("Averaged Test AUC: {:.4f}".format(test_auc))
-        print("Averaged Overlapping Accurancy: {:.4f}".format(overlap_acc))
+        # print("Averaged Overlapping Accurancy: {:.4f}".format(overlap_acc))
         # print("Averaged Unique Accurancy: {:.4f}".format(unique_acc))
 
-        # print("Averaged Forget Accurancy: {:.4f}".format(forget_acc))
+        print("Averaged Forget Accurancy: {:.4f}".format(forget_acc))
         # print("Averaged Retain Accurancy: {:.4f}".format(retain_acc))
         # self.print_(test_acc, train_acc, train_loss)
         print("Std Test Accurancy: {:.4f}".format(np.std(accs)))
@@ -608,6 +608,8 @@ class Server(object):
             self.selected_clients = self.select_clients()
             self.send_models()
             self.send_models_target()
+            if(i==0):
+                self.warm_up()
             
             print(f"\n-------------Round number: {i}-------------")
             print("\nEvaluate global model")
@@ -705,19 +707,29 @@ class Server(object):
         # 这里随机选取一个正常客户端的模型做各层的对比
         from torch_cka import CKA
 
-        dataloader = self.unlearning_clients[0].train_loader
+        dataloader = self.unlearning_clients[0].test_loader
         # dataloader = self.clients[1].test_loader
         # model1 = copy.deepcopy(self.unlearning_clients[0].model)
-        model1 = copy.deepcopy(self.global_model)
+        model1 = copy.deepcopy(self.unlearning_clients[0].model)
         # model_path = os.path.join("models_seed"+str(self.args.seed_num)+"_resnet", self.dataset)
         # model_path = os.path.join(model_path, ((''.join(map(str, self.args.unlearning_clients)) + 
         #                               "_attack_server" ) if self.args.attack=='True' else "_server") + ".pt")
         # model2 = torch.load(model_path, map_location='cuda' if torch.cuda.is_available() else 'cpu',weights_only=False)
-        model2 = copy.deepcopy(self.global_model)
+        model2 = copy.deepcopy(self.unlearning_clients[0].model)
 
-        model1.eval()
-        model2.eval()
-        cka = CKA(model1=model1, model2=model2,
+        # model1.train()
+        # model2.train()
+        # for i, (x, y) in enumerate(dataloader):
+        #     if type(x) == type([]):
+        #         x[0] = x[0].to(self.device)
+        #     else:
+        #         x = x.to(self.device)
+        #     y = y.to(self.device)
+
+        #     output = model1(x)
+        #     output = model2(x)
+
+        cka = CKA(model1=self.unlearning_clients[0].model, model2=self.unlearning_clients[0].model,
                             model1_layers=[
                                 # 'base.ResNet.maxpool',
                                             'base.layer1',
@@ -740,7 +752,7 @@ class Server(object):
 
         # 计算 CKA
         # cka.hsic_matrix = torch.nan_to_num(cka.hsic_matrix, nan=0.0)
-        cka.kernel = "linear"
+        cka.kernel = "rbf"
         cka.compare(dataloader)
         cka.plot_results(save_path="specified_layers_cka_"+self.algorithm+".png")
         cka_matrix = cka.export()['CKA']  # 或 cka_matrix = cka.CKA_matrix
@@ -837,7 +849,7 @@ class Server(object):
             torch.nn.utils.clip_grad_norm_(self.global_model.parameters(), max_norm=5.0)
             self.opt_ul.step()
         self.send_models_target()
-    def get_pure_noise(self):
+    def get_pure_noise2(self):
         x_all=[]
         y_all=[]
 
@@ -972,7 +984,7 @@ class Server(object):
         
         for c in self.unlearning_clients:
             c.model.eval()
-            test_data = read_client_data("Cifar10", 1, is_train=False)
+            test_data = read_client_data("Cifar10", 1, is_train=True)
             class_1 = [(x, y) for x, y in test_data if y == 1][:200]
             poison_x = backdoor_pattern([
                 x for x, y in class_1 
@@ -995,11 +1007,31 @@ class Server(object):
 
                     if i > 150:
                         break
+        feat_C, label_C = [], []
+        for c in self.unlearning_clients:
+            c.model.eval()
+            dataloader1 = self.get_pure_noise()
+            
+            with torch.no_grad():
+                for i, (x, y) in enumerate(dataloader1):
+                    if type(x) == type([]):
+                        x[0] = x[0].to(self.device)
+                    else:
+                        x = x.to(self.device)
+                    
+                    feat = c.model.base(x)
+                    feat_C.append(feat.cpu().numpy())
+                    label_C.append(y.numpy())
+
+                    if i > 150:
+                        break
+        feat_C = np.concatenate(feat_C, axis=0)
+        label_C = np.concatenate(label_C, axis=0)
 
         feat_B = np.concatenate(feat_B, axis=0)
         label_B = np.concatenate(label_B, axis=0)
 
-        features = np.concatenate([feat_A, feat_B], axis=0)
+        features = np.concatenate([feat_A, feat_B,feat_C], axis=0)
         print("finish collect features")
 
         tsne = TSNE(
@@ -1017,12 +1049,14 @@ class Server(object):
 
         n_A = len(feat_A)
         n_B = len(feat_B)
+        n_C = len(feat_C)
         tsne_A = tsne_result[:n_A]
         tsne_B = tsne_result[n_A:n_A+n_B]
+        tsne_C = tsne_result[n_A+n_B:n_A+n_B+n_C]
 
         label_list = [0,1,2,3]
-        colors = ["#AFBB0D","#40ef7d","#23D7D4",'#F5B482',"#430CDB",'#6ec3f7',"#6ef7de","#c06ef7","#e58443","#4B4A76"]
-
+        # colors = ["#AFBB0D","#40ef7d","#23D7D4",'#F5B482',"#430CDB",'#6ec3f7',"#6ef7de","#c06ef7","#e58443","#4B4A76"]
+        colors = plt.cm.tab20c(np.linspace(0, 1, 9))
         plt.figure(figsize=(10, 8))
 
         for label in label_list:
@@ -1037,10 +1071,19 @@ class Server(object):
         plt.scatter(
             tsne_B[label_B == 0, 0][:200],
             tsne_B[label_B == 0, 1][:200],
-            c='#ea5c5c',
+            c=colors[4],
             marker='s',      # label 0
             label='Posion DataLoader - Label '+str(1)
         )
+
+        for label in label_list:
+            plt.scatter(
+                tsne_C[label_C == label, 0][:200],
+                tsne_C[label_C == label, 1][:200],
+                c=colors[label+5],
+                marker='p',      # label 0
+                label='Noise DataLoader - Label '+str(label-1)
+            )
         
         
         plt.legend()
