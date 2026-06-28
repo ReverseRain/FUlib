@@ -92,12 +92,13 @@ class FedNoise(Server):
 
         self.opt_ul = torch.optim.SGD(self.global_model.parameters(), lr=self.args.unlearning_rate
                                          ,momentum=0.9,weight_decay=0.0005)
+        # self.opt_ul = torch.optim.SGD(self.global_model.parameters(), lr=self.args.unlearning_rate)
         criterion = nn.CrossEntropyLoss()
 
         if(self.args.noise_type == "class_noise"):
             noise_loader = self.get_class_noise()
         elif(self.args.noise_type == "pure_noise"):
-            noise_loader = self.get_pure_noise()
+            noise_loader,min_d, max_d = self.get_pure_noise()
         elif(self.args.noise_type == "svhn"):
             noise_loader = self.get_svhn()
         elif(self.args.noise_type == "shuffle"):
@@ -105,8 +106,12 @@ class FedNoise(Server):
 
         model = copy.deepcopy(self.global_model)
         mean = torch.tensor([0.5, 0.3, 0.7]).view(3, 1, 1).expand(3, 32, 32)
-        mean_list = [(mean*(10-i)-0.5)/0.5 for i in range(self.num_classes)]
+        # mean_list = [mean for i in range(self.num_classes)]
+        mean_list = [(mean*(self.num_classes-i))*1 for i in range(self.num_classes)]
         means = torch.stack(mean_list).to(self.device)
+
+        max_d = torch.tensor(max_d, device=self.device)  # shape: (num_classes,)
+        min_d = torch.tensor(min_d, device=self.device)
         self.global_model.train()
 
         # lamda = 0.005
@@ -122,9 +127,10 @@ class FedNoise(Server):
                 c.model = copy.deepcopy(self.global_model)
             if(i==0):
                 self.warm_up()
-                self.draw_tsne("tsne_before_unlearning_noise3.png")
+                # self.draw_tsne("tsne_before_unlearning.png")
             self.evaluate()
-            
+            gm = torch.cat([p.view(-1) for p in self.global_model.parameters()], dim=0)  
+            losses = 0
             for _, (x, y) in enumerate(noise_loader):
                 if type(x) == type([]):
                     x[0] = x[0].to(self.device)
@@ -135,12 +141,26 @@ class FedNoise(Server):
                 output = self.global_model(x) 
 
                 batch_means = means[y]
-                distance_sq = lamda * torch.sum((x - batch_means) ** 2, dim=(1, 2, 3))
-                # distance_sq =  0.1 * torch.sqrt(torch.sum((x - batch_means) ** 2, dim=(1, 2, 3))+1e-8)
-
-                loss = (criterion(output, y) * (1.0 / (distance_sq + 1e-4))).mean()
+                # distance_sq = torch.sum((x - batch_means) ** 2, dim=(1, 2, 3)) * lamda
+                distance_sq = torch.norm(x - batch_means, p=2, dim=(1, 2, 3))
+                # distance_sq =  torch.sum((x - batch_means) ** 2, dim=(1, 2, 3)) 
 
                 # loss = criterion(output, y)
+                # print("norm loss ",loss)
+                # print("max_d",max_d,"min_d",min_d,"distance_sq",distance_sq)
+                batch_max_d = max_d[y]
+                batch_min_d = min_d[y]
+
+                weights = ((batch_max_d-distance_sq)/(batch_max_d-batch_min_d))**2
+                # print('distance_sq',distance_sq,'batch_min_d',batch_min_d)
+                # weights = torch.exp(-(distance_sq-batch_min_d)/2)
+                # weights = 0.99 * weights + 0.01
+                # print("weights",weights.mean())
+
+                loss = (criterion(output, y) * weights).mean()
+                # print("weights loss ",loss)
+                losses += loss
+                # print(losses)
 
                 # gm = torch.cat([p.data.view(-1) for p in self.global_model.base.parameters()], dim=0)
                 # pm = torch.cat([p.data.view(-1) for p in model.base.parameters()], dim=0)
@@ -148,11 +168,27 @@ class FedNoise(Server):
 
                 self.opt_ul.zero_grad()
                 loss.backward()
-                torch.nn.utils.clip_grad_norm_(self.global_model.parameters(), max_norm=5.0)
+                torch.nn.utils.clip_grad_norm_(self.global_model.parameters(), max_norm=3)
                 self.opt_ul.step()
-            
+            print("losses is ",losses)
+            nm = torch.cat([p.view(-1) for p in self.global_model.parameters()], dim=0)  
+            normal_grad = []
             for client in self.selected_clients:
                 client.train()
+                
+                pm=torch.cat([p.view(-1) for p in client.model.parameters()], dim=0) 
+                normal_grad.append(pm-gm)
+                    
+            angles_rad = [
+                torch.acos(torch.clamp(
+                    torch.dot(grad.flatten(), nm.flatten()) / (torch.norm(grad) * torch.norm(nm) + 1e-8),
+                    -1.0, 1.0
+                )).item()
+                for grad in normal_grad
+            ]
+
+            mean_ang_rad = torch.mean(torch.tensor(angles_rad))
+            print('noise ',mean_ang_rad)   
             self.aggregate_parameters_server(len(noise_loader.dataset))
 
             self.unlearn_Budget.append(time.time() - s_t)
@@ -164,8 +200,8 @@ class FedNoise(Server):
         print("MIA Attacker to unlearning model precision = {:.4f}".format(PRE_unlearning))
         print("MIA Attacker to unlearning model recall = {:.4f}".format(REC_unlearning))
         self.save_unlearning(PRE_unlearning)
-        self.draw_tsne("tsne_after_unlearning_NoiseFU_noise3.png")
         # self.cka_analyse()
+        self.draw_tsne("tsne_after_unlearning_NoiseFU.png",noise_loader)
 
     
     def get_class_noise(self):
@@ -213,12 +249,15 @@ class FedNoise(Server):
     def get_pure_noise(self):
         x_all=[]
         y_all=[]
+        per_class_distances = [[] for _ in range(self.num_classes)]
 
-        means = torch.tensor([0.5, 0.3, 0.7]).view(3, 1, 1)
-        # stds = torch.tensor([0.3, 0.2, 0.65]).view(3, 1, 1)
-        stds = torch.tensor([0.25, 0.25, 0.45]).view(3, 1, 1)
+        means = torch.tensor([0.5, 0.3, 0.7]).view(3, 1, 1).expand(3, 32, 32)
+        # stds = torch.tensor([0.25, 0.25, 0.45]).view(3, 1, 1)
+        # stds = torch.tensor([0.2, 0.2, 0.4]).view(3, 1, 1)
+        stds = torch.tensor([0.2, 0.3, 0.4]).view(3, 1, 1)
 
-        u_list = [(10-i) * means for i in range(self.num_classes)]
+
+        u_list = [ ((self.num_classes-i)*means)*1 for i in range(self.num_classes)]
         # u_list = [means for i in range(self.num_classes)]
         
         
@@ -230,14 +269,26 @@ class FedNoise(Server):
             y_all.append(torch.tensor(i))
             x_all.append(noise.unsqueeze(0))
 
+            d = torch.norm(noise - u, p=2) 
+            # d = torch.sum((noise - u) ** 2, dim=(0,1,2)) 
+            per_class_distances[i].append(d)
+
         x_all = torch.cat(x_all, dim=0)
         y_all = torch.tensor(y_all)
-        x_all = (x_all - 0.5) / 0.5
+        min_d = []
+        max_d = []
+        for class_idx in range(self.num_classes):
+            if per_class_distances[class_idx]:  # 如果该类有样本
+                min_d.append(min(per_class_distances[class_idx]))
+                max_d.append(max(per_class_distances[class_idx]))
+            else:  # 如果该类没有样本，填充默认值
+                min_d.append(float('inf'))
+                max_d.append(float('-inf'))
 
 
         noise_data=[(x,y) for x,y in zip(x_all,y_all)]
         
-        return DataLoader(noise_data, self.batch_size, drop_last=True, shuffle=True)
+        return DataLoader(noise_data, self.batch_size, drop_last=True, shuffle=True), min_d, max_d
     
     def get_svhn(self):
 

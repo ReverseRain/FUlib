@@ -55,7 +55,7 @@ class clientPGD(Client):
 
         max_local_epochs = self.local_epochs
         w_ref = torch.cat([p.data.view(-1) for p in self.model.parameters()], dim=0)
-        theta=0.1 #cifar10 ----> 1  else 0.1   cifar100 true/false 0.08  
+        theta=0.1 
         print("theta is ",theta)
         for epoch in range(max_local_epochs):
             for i, (x, y) in enumerate(self.train_loader):

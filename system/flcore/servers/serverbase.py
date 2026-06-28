@@ -849,7 +849,7 @@ class Server(object):
             torch.nn.utils.clip_grad_norm_(self.global_model.parameters(), max_norm=5.0)
             self.opt_ul.step()
         self.send_models_target()
-    def get_pure_noise2(self):
+    def get_pure_noise(self):
         x_all=[]
         y_all=[]
 
@@ -959,11 +959,14 @@ class Server(object):
         for w, client_model in zip(self.uploaded_weights, self.uploaded_models):
             self.add_parameters(w, client_model)
 
-    def draw_tsne(self,name):
+    def draw_tsne(self,name,noise_loader):
         features = []
         labels = []
         feat_A, label_A = [], []
         feat_B, label_B = [], []
+        # self.send_models()
+        # for c in self.unlearning_clients:
+        #     c.model = copy.deepcopy(self.global_model)
         for c in self.clients:
             c.model.eval()
             with torch.no_grad():
@@ -976,7 +979,7 @@ class Server(object):
                     feat = c.model.base(x)
                     feat_A.append(feat.cpu().numpy())
                     label_A.append(y.numpy())
-                    if i > 20:
+                    if i > 30:
                         break
 
         feat_A = np.concatenate(feat_A, axis=0)
@@ -984,8 +987,8 @@ class Server(object):
         
         for c in self.unlearning_clients:
             c.model.eval()
-            test_data = read_client_data("Cifar10", 1, is_train=True)
-            class_1 = [(x, y) for x, y in test_data if y == 1][:200]
+            test_data = read_client_data("Cifar10", c.id, is_train=False)
+            class_1 = [(x, y) for x, y in test_data if y == 1]
             poison_x = backdoor_pattern([
                 x for x, y in class_1 
             ])
@@ -1004,13 +1007,13 @@ class Server(object):
                     feat = c.model.base(x)
                     feat_B.append(feat.cpu().numpy())
                     label_B.append(y.numpy())
-
-                    if i > 150:
+                    if i > 200:
                         break
+
         feat_C, label_C = [], []
         for c in self.unlearning_clients:
-            c.model.eval()
-            dataloader1 = self.get_pure_noise()
+            self.global_model.eval()
+            dataloader1 = noise_loader
             
             with torch.no_grad():
                 for i, (x, y) in enumerate(dataloader1):
@@ -1019,17 +1022,21 @@ class Server(object):
                     else:
                         x = x.to(self.device)
                     
-                    feat = c.model.base(x)
+                    feat = self.global_model.base(x)
                     feat_C.append(feat.cpu().numpy())
                     label_C.append(y.numpy())
-
                     if i > 150:
                         break
+
         feat_C = np.concatenate(feat_C, axis=0)
         label_C = np.concatenate(label_C, axis=0)
 
         feat_B = np.concatenate(feat_B, axis=0)
         label_B = np.concatenate(label_B, axis=0)
+
+        feat_A, label_A = self.filter_target([0,1,2],feat_A,label_A,200)
+        feat_B, label_B = self.filter_target([0],feat_B,label_B,200)
+        feat_C, label_C = self.filter_target([0,1,2],feat_C,label_C,200)
 
         features = np.concatenate([feat_A, feat_B,feat_C], axis=0)
         print("finish collect features")
@@ -1054,7 +1061,7 @@ class Server(object):
         tsne_B = tsne_result[n_A:n_A+n_B]
         tsne_C = tsne_result[n_A+n_B:n_A+n_B+n_C]
 
-        label_list = [0,1,2,3]
+        label_list = [0,1,2]
         # colors = ["#AFBB0D","#40ef7d","#23D7D4",'#F5B482',"#430CDB",'#6ec3f7',"#6ef7de","#c06ef7","#e58443","#4B4A76"]
         colors = plt.cm.tab20c(np.linspace(0, 1, 9))
         plt.figure(figsize=(10, 8))
@@ -1072,7 +1079,7 @@ class Server(object):
             tsne_B[label_B == 0, 0][:200],
             tsne_B[label_B == 0, 1][:200],
             c=colors[4],
-            marker='s',      # label 0
+            marker='s',
             label='Posion DataLoader - Label '+str(1)
         )
 
@@ -1081,8 +1088,8 @@ class Server(object):
                 tsne_C[label_C == label, 0][:200],
                 tsne_C[label_C == label, 1][:200],
                 c=colors[label+5],
-                marker='p',      # label 0
-                label='Noise DataLoader - Label '+str(label-1)
+                marker='p', 
+                label='Noise DataLoader - Label '+str(label)
             )
         
         
@@ -1090,3 +1097,20 @@ class Server(object):
         plt.title("t-SNE")
         plt.savefig(name)
         return
+    def filter_target(self,target_labels,feat,label,samples_per_class):
+        feat_filtered = []
+        label_filtered = []
+
+        for cl in target_labels:
+            idx = np.where(label == cl)[0]
+            
+            n_samples = min(samples_per_class, len(idx))
+
+            chosen_idx = np.random.choice(idx, size=n_samples, replace=False)
+            
+            feat_filtered.append(feat[chosen_idx])
+            label_filtered.append(label[chosen_idx])
+
+        feat = np.concatenate(feat_filtered, axis=0)
+        label = np.concatenate(label_filtered, axis=0)
+        return feat,label

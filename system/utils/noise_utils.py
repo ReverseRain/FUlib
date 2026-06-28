@@ -90,8 +90,8 @@ class NoiseGenerator:
                     preds = torch.argmax(output, dim=1)
                     acc = (preds == target_class).float().mean().item()
                     conf = torch.softmax(output, dim=1).max(dim=1)[0].mean().item()
-                print(f"    [NoiseGen] class={target_class}, step={step+1}/{steps}, "
-                      f"loss={loss.item():.4f}, acc={acc:.4f}, conf={conf:.4f}")
+                # print(f"    [NoiseGen] class={target_class}, step={step+1}/{steps}, "
+                #       f"loss={loss.item():.4f}, acc={acc:.4f}, conf={conf:.4f}")
 
         # detach 并返回
         noise = noise.detach()
@@ -165,8 +165,8 @@ class NoiseGenerator:
             all_noises.append(aligned_noise.detach())
             all_labels.append(aligned_label.detach())
 
-            print(f"  [NoiseGen] Batch {batch_idx + 1}/{len(client_train_loader)} 代理噪声制造完毕. "
-                  f"包含类别: {unique_classes.cpu().tolist()}")
+            # print(f"  [NoiseGen] Batch {batch_idx + 1}/{len(client_train_loader)} 代理噪声制造完毕. "
+            #       f"包含类别: {unique_classes.cpu().tolist()}")
 
         return all_noises, all_labels
 
@@ -193,7 +193,7 @@ class NoiseGenerator:
         for cls, count in class_counts.items():
             if count <= 0:
                 continue
-            print(f"  [NoiseGen] 正在为类别 {cls} 对抗优化合成 {count} 个代理噪声样本...")
+            # print(f"  [NoiseGen] 正在为类别 {cls} 对抗优化合成 {count} 个代理噪声样本...")
 
             # 调用底层单类优化流（公式 3 的核心实现）
             noise, labels = self.generate_for_class(
@@ -221,8 +221,8 @@ class NoiseGenerator:
         all_noises = all_noises[shuffle_indices]
         all_labels = all_labels[shuffle_indices]
 
-        print(f"  [NoiseGen] 全局代理数据集 N_f 组装完毕. 总样本数: {total_samples}, "
-              f"包含独特类别数: {len(class_counts)}")
+        # print(f"  [NoiseGen] 全局代理数据集 N_f 组装完毕. 总样本数: {total_samples}, "
+        #       f"包含独特类别数: {len(class_counts)}")
 
         # 剥离计算图返回，作为安全的全局大矩阵
         return all_noises.detach(), all_labels.detach()
@@ -272,7 +272,7 @@ def aggregate_client_noises(client_noises_list, client_labels_list):
     aggregated_noises = aggregated_noises[shuffle_indices]
     aggregated_labels = aggregated_labels[shuffle_indices]
 
-    print(f"[Server Aggregation] 代理数据集 N_f 整合成功. 总样本数: {total_samples}")
+    # print(f"[Server Aggregation] 代理数据集 N_f 整合成功. 总样本数: {total_samples}")
     return aggregated_noises, aggregated_labels
 
 
@@ -298,13 +298,13 @@ def create_noise_dataloader(noises, labels, batch_size, shuffle=True):
 def save_proxy_noise(noises, labels, save_path):
     """保存代理噪声到文件"""
     torch.save({'noises': noises, 'labels': labels}, save_path)
-    print(f"[NoiseGen] Proxy noise saved to {save_path}, "
-          f"shape={noises.shape}, num_classes={labels.unique().shape[0]}")
+    # print(f"[NoiseGen] Proxy noise saved to {save_path}, "
+    #       f"shape={noises.shape}, num_classes={labels.unique().shape[0]}")
 
 
 def load_proxy_noise(load_path, device='cpu'):
     """从文件加载代理噪声"""
     data = torch.load(load_path, map_location=device)
-    print(f"[NoiseGen] Proxy noise loaded from {load_path}, "
-          f"shape={data['noises'].shape}")
+    # print(f"[NoiseGen] Proxy noise loaded from {load_path}, "
+    #       f"shape={data['noises'].shape}")
     return data['noises'], data['labels']

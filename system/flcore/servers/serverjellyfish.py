@@ -428,7 +428,13 @@ class Jellyfish(Server):
                     gradient_mask[name] = torch.ones_like(param.data).to(self.device)
 
         # 3. 实例化多目标遗忘的核心闭环执行引擎
-        optimizer_unlearn = torch.optim.Adam(self.global_model.parameters(), lr=self.unlearn_lr)
+        # optimizer_unlearn = torch.optim.Adam(self.global_model.parameters(), lr=self.unlearn_lr)
+        optimizer_unlearn = torch.optim.SGD(
+            self.global_model.parameters(),
+            lr=1e-4,  # 物理限速
+            momentum=0.9,
+            weight_decay=0.0005  # 引入权重衰减，锁死参数漂移
+        )
         criterion_ce = nn.CrossEntropyLoss()
         criterion_kl = nn.KLDivLoss(reduction='batchmean')
 
@@ -540,6 +546,9 @@ class Jellyfish(Server):
                         if name in g_composite:
                             # 将外科手术式修正后的合成梯度 G 手动挂载回实体的 .grad 容器中
                             param.grad = g_composite[name].clone()
+
+                # 在 step() 之前，强制对合成梯度 G 实施范数裁剪
+                torch.nn.utils.clip_grad_norm_(self.global_model.parameters(), max_norm=0.5)
 
                 optimizer_unlearn.step()
 
