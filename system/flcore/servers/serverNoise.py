@@ -75,7 +75,7 @@ class FedNoise(Server):
         print("MIA Attacker to old model precision = {:.4f}".format(PRE_old))
         print("MIA Attacker to old model recall = {:.4f}".format(REC_old))
 
-        self.save_results()
+        # self.save_results()
         self.save_global_model()
 
         if self.num_new_clients > 0:
@@ -107,7 +107,7 @@ class FedNoise(Server):
         model = copy.deepcopy(self.global_model)
         mean = torch.tensor([0.5, 0.3, 0.7]).view(3, 1, 1).expand(3, 32, 32)
         # mean_list = [mean for i in range(self.num_classes)]
-        mean_list = [(mean*(self.num_classes-i))*1 for i in range(self.num_classes)]
+        mean_list = [(mean*(self.num_classes-i))*2 for i in range(self.num_classes)]
         means = torch.stack(mean_list).to(self.device)
 
         max_d = torch.tensor(max_d, device=self.device)  # shape: (num_classes,)
@@ -127,7 +127,7 @@ class FedNoise(Server):
                 c.model = copy.deepcopy(self.global_model)
             if(i==0):
                 self.warm_up()
-                # self.draw_tsne("tsne_before_unlearning.png")
+                # self.draw_tsne("tsne_before_unlearning2.png",noise_loader)
             self.evaluate()
             gm = torch.cat([p.view(-1) for p in self.global_model.parameters()], dim=0)  
             losses = 0
@@ -141,34 +141,19 @@ class FedNoise(Server):
                 output = self.global_model(x) 
 
                 batch_means = means[y]
-                # distance_sq = torch.sum((x - batch_means) ** 2, dim=(1, 2, 3)) * lamda
+                
                 distance_sq = torch.norm(x - batch_means, p=2, dim=(1, 2, 3))
-                # distance_sq =  torch.sum((x - batch_means) ** 2, dim=(1, 2, 3)) 
-
-                # loss = criterion(output, y)
-                # print("norm loss ",loss)
-                # print("max_d",max_d,"min_d",min_d,"distance_sq",distance_sq)
                 batch_max_d = max_d[y]
                 batch_min_d = min_d[y]
 
                 weights = ((batch_max_d-distance_sq)/(batch_max_d-batch_min_d))**2
-                # print('distance_sq',distance_sq,'batch_min_d',batch_min_d)
-                # weights = torch.exp(-(distance_sq-batch_min_d)/2)
-                # weights = 0.99 * weights + 0.01
-                # print("weights",weights.mean())
 
                 loss = (criterion(output, y) * weights).mean()
-                # print("weights loss ",loss)
                 losses += loss
-                # print(losses)
-
-                # gm = torch.cat([p.data.view(-1) for p in self.global_model.base.parameters()], dim=0)
-                # pm = torch.cat([p.data.view(-1) for p in model.base.parameters()], dim=0)
-                # loss += torch.norm(gm-pm, p=2) * 0.1
 
                 self.opt_ul.zero_grad()
                 loss.backward()
-                torch.nn.utils.clip_grad_norm_(self.global_model.parameters(), max_norm=3)
+                torch.nn.utils.clip_grad_norm_(self.global_model.parameters(), max_norm=2.5)
                 self.opt_ul.step()
             print("losses is ",losses)
             nm = torch.cat([p.view(-1) for p in self.global_model.parameters()], dim=0)  
@@ -199,9 +184,9 @@ class FedNoise(Server):
 
         print("MIA Attacker to unlearning model precision = {:.4f}".format(PRE_unlearning))
         print("MIA Attacker to unlearning model recall = {:.4f}".format(REC_unlearning))
-        self.save_unlearning(PRE_unlearning)
+        # self.save_unlearning(PRE_unlearning)
         # self.cka_analyse()
-        self.draw_tsne("tsne_after_unlearning_NoiseFU.png",noise_loader)
+        # self.draw_tsne("tsne_after_unlearning_NoiseFU2.png",noise_loader)
 
     
     def get_class_noise(self):
@@ -257,7 +242,7 @@ class FedNoise(Server):
         stds = torch.tensor([0.2, 0.3, 0.4]).view(3, 1, 1)
 
 
-        u_list = [ ((self.num_classes-i)*means)*1 for i in range(self.num_classes)]
+        u_list = [ ((self.num_classes-i)*means)*2 for i in range(self.num_classes)]
         # u_list = [means for i in range(self.num_classes)]
         
         
@@ -300,4 +285,3 @@ class FedNoise(Server):
         shuffled_data=[(x,(y+torch.randint(1, self.num_classes, y.shape, device=y.device))%self.num_classes) for x,y in dataset]
         return DataLoader(shuffled_data, self.batch_size, drop_last=True, shuffle=True)
   
-

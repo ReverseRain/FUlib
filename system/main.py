@@ -140,7 +140,7 @@ def run(arg):
         time_list.append(time.time()-start)
 
         print(f"\nAverage time cost: {round(np.average(time_list), 2)}s.")
-        server.save_loss(args.global_rounds)
+        # server.save_loss(args.global_rounds)
 
     # Global average
     # average_data(dataset=args.dataset, algorithm=args.algorithm, goal=args.goal, times=args.times)

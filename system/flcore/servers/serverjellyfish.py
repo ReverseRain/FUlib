@@ -371,7 +371,7 @@ class Jellyfish(Server):
 
                 optimizer_dis.zero_grad()
                 loss_disentangle.backward()
-                torch.nn.utils.clip_grad_norm_(self.global_model.base.parameters(), max_norm=1.0)  # 🌟 物理防爆
+                torch.nn.utils.clip_grad_norm_(self.global_model.base.parameters(), max_norm=10.0)  # 🌟 物理防爆
                 optimizer_dis.step()
 
 
@@ -481,7 +481,7 @@ class Jellyfish(Server):
                 # 融合成联合任务损失 L_unlearn (公式 8)
                 loss_unlearn = loss_hard + self.mu_c * loss_confusion + self.mu_d * loss_distill
                 loss_unlearn.backward()
-                torch.nn.utils.clip_grad_norm_(self.global_model.parameters(), max_norm=1.0)
+                torch.nn.utils.clip_grad_norm_(self.global_model.parameters(), max_norm=10.0)
 
                 # 完美抽取并打包独立干净的遗忘梯度向量 g_f
                 g_f = {}
@@ -548,7 +548,7 @@ class Jellyfish(Server):
                             param.grad = g_composite[name].clone()
 
                 # 在 step() 之前，强制对合成梯度 G 实施范数裁剪
-                torch.nn.utils.clip_grad_norm_(self.global_model.parameters(), max_norm=0.5)
+                torch.nn.utils.clip_grad_norm_(self.global_model.parameters(), max_norm=10)
 
                 optimizer_unlearn.step()
 
@@ -656,7 +656,7 @@ class Jellyfish(Server):
                 # 计算公式 (24)：在全局保留代理噪声数据集上的交叉熵损失
                 loss_repair = criterion_repair(rep_outputs, r_y)
                 loss_repair.backward()
-                torch.nn.utils.clip_grad_norm_(self.global_model.parameters(), max_norm=1.0)
+                torch.nn.utils.clip_grad_norm_(self.global_model.parameters(), max_norm=10)
                 optimizer_repair.step()
 
                 loss_rep_total += loss_repair.item()

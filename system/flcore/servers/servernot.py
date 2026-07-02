@@ -128,7 +128,7 @@ class FedNOT(Server):
         print("MIA Attacker to unlearning model recall = {:.4f}".format(REC_unlearning))
         self.save_unlearning(PRE_unlearning)
     
-    def negate_layers(self, layer_indicies=[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18]):
+    def negate_layers(self, layer_indicies = list(range(16))):
         with torch.no_grad():
             for layer_indx, param in enumerate(self.global_model.parameters()):
                 if layer_indx in layer_indicies:

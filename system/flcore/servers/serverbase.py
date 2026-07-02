@@ -624,9 +624,6 @@ class Server(object):
             ga=gm-m
 
             self.aggregate_parameters()
-            ngm = torch.cat([p.view(-1) for p in self.global_model.parameters()], dim=0)
-            gt=(torch.dot((ngm-gm),ga)/(torch.norm(ga)+1e-4)**2 )*ga
-            self.overwrite_grad(self.global_model.parameters,gt)
 
             self.Budget.append(time.time() - s_t)
             print('-'*25, 'time cost', '-'*25, self.Budget[-1])
@@ -977,6 +974,7 @@ class Server(object):
                         x = x.to(self.device)
                     
                     feat = c.model.base(x)
+                    output = c.model.head(feat)
                     feat_A.append(feat.cpu().numpy())
                     label_A.append(y.numpy())
                     if i > 30:
@@ -987,12 +985,12 @@ class Server(object):
         
         for c in self.unlearning_clients:
             c.model.eval()
-            test_data = read_client_data("Cifar10", c.id, is_train=False)
-            class_1 = [(x, y) for x, y in test_data if y == 1]
+            test_data = read_client_data("Cifar10", c.id, is_train=True)
+            # class_1 = [(x, y) for x, y in test_data if y == 9]
             poison_x = backdoor_pattern([
-                x for x, y in class_1 
+                x for x, y in test_data 
             ])
-            poison_y=[0 for _ in poison_x]
+            poison_y=[y for x,y in test_data]
 
             poison_data=[(x,y) for x,y in zip(poison_x,poison_y)]
             dataloader1 = DataLoader(poison_data, 32, drop_last=True, shuffle=False)
@@ -1007,8 +1005,8 @@ class Server(object):
                     feat = c.model.base(x)
                     feat_B.append(feat.cpu().numpy())
                     label_B.append(y.numpy())
-                    if i > 200:
-                        break
+                    # if i > 200:
+                    #     break
 
         feat_C, label_C = [], []
         for c in self.unlearning_clients:
@@ -1034,11 +1032,18 @@ class Server(object):
         feat_B = np.concatenate(feat_B, axis=0)
         label_B = np.concatenate(label_B, axis=0)
 
-        feat_A, label_A = self.filter_target([0,1,2],feat_A,label_A,200)
-        feat_B, label_B = self.filter_target([0],feat_B,label_B,200)
-        feat_C, label_C = self.filter_target([0,1,2],feat_C,label_C,200)
+        feat_A, label_A = self.filter_target([0,1,2,3,4,5,6,7,8,9],feat_A,label_A,200)
+        feat_B, label_B = self.filter_target([0,1,2,3,4,5,6,7,8,9],feat_B,label_B,200)
+        feat_C, label_C = self.filter_target([0,1,2,3,4,5,6,7,8,9],feat_C,label_C,200)
 
         features = np.concatenate([feat_A, feat_B,feat_C], axis=0)
+
+        labels = np.concatenate([label_A, label_B+10, label_C+20], axis=0)
+        np.savez('./' + name.replace(".png", ".npz"),
+                features=features,
+                labels=labels)
+        from sklearn.preprocessing import StandardScaler
+        features = StandardScaler().fit_transform(features)
         print("finish collect features")
 
         tsne = TSNE(
@@ -1061,9 +1066,9 @@ class Server(object):
         tsne_B = tsne_result[n_A:n_A+n_B]
         tsne_C = tsne_result[n_A+n_B:n_A+n_B+n_C]
 
-        label_list = [0,1,2]
+        label_list = [0,8,9]
         # colors = ["#AFBB0D","#40ef7d","#23D7D4",'#F5B482',"#430CDB",'#6ec3f7',"#6ef7de","#c06ef7","#e58443","#4B4A76"]
-        colors = plt.cm.tab20c(np.linspace(0, 1, 9))
+        colors = plt.cm.tab20c(np.linspace(0, 1, 21))
         plt.figure(figsize=(10, 8))
 
         for label in label_list:
@@ -1080,7 +1085,7 @@ class Server(object):
             tsne_B[label_B == 0, 1][:200],
             c=colors[4],
             marker='s',
-            label='Posion DataLoader - Label '+str(1)
+            label='Posion DataLoader - Label '+str(9)
         )
 
         for label in label_list:

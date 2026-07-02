@@ -208,74 +208,8 @@ class Client(object):
                 x = x.to(self.device)
             y = y.to(self.device)
 
-            output = self.model(x)
+            _ = self.model(x)
 
-    def store_tsne(self,name):
-
-        test_data1 = read_client_data("Cifar10", 1, is_train=True)
-        class_6 = [(x, y) for x, y in test_data1 if y == 1][:200]
-
-        poison_x = backdoor_pattern([
-            x for x, y in class_6 
-        ])
-        poison_y=[1 for _ in poison_x]
-
-        poison_data=[(x,y) for x,y in zip(poison_x,poison_y)]
-
-        test_data1 =  poison_data
-
-        dataloader1 = DataLoader(test_data1, 32, drop_last=True, shuffle=False)
-
-
-        test_data2 = read_client_data("Cifar10", 0, is_train=True)
-        class_3 = [(x, y) for x, y in test_data2 if y == 0][:200]
-        class_6 = [(x, y) for x, y in test_data2 if y == 1][:200]
-
-        test_data2 = class_3 + class_6
-        dataloader2 = DataLoader(test_data2, 32, drop_last=True, shuffle=False)
-
-        model = self.model.base
-
-        def extract_features(model, dataloader, device):
-            # model.eval()
-            features = []
-            labels = []
-
-            with torch.no_grad():
-                for x, y in dataloader:
-                    x = x.to(device)
-                    feat = model(x)          # 假设 model 返回的是特征向量
-                    predicted_indices = torch.argmax(feat, dim=1)
-                    # print(predicted_indices,feat.shape,feat[0])
-                    features.append(feat.cpu().numpy())
-                    labels.append(y.numpy())
-
-            features = np.concatenate(features, axis=0)
-            labels = np.concatenate(labels, axis=0)
-            return features, labels
-
-
-        feat_A, label_A = extract_features(model, dataloader1, self.device)
-        source_A = np.zeros(len(label_A), dtype=np.int32)
-        feat_B, label_B = extract_features(model, dataloader2, self.device)
-        source_B = np.ones(len(label_B), dtype=np.int32)
-
-
-        all_features = np.concatenate([feat_A, feat_B], axis=0)
-        all_labels = np.concatenate([label_A, label_B], axis=0)
-        all_sources = np.concatenate([source_A, source_B], axis=0)
-
-        features_tensor = torch.from_numpy(all_features)
-        labels_tensor = torch.from_numpy(all_labels)         
-        sources_tensor = torch.from_numpy(all_sources)
-
-        torch.save({
-            'features': features_tensor,    # 特征向量 (N, D)
-            'labels': labels_tensor,        # 类别标签 (N,) - 0或1
-            'sources': sources_tensor,      # 数据来源 (N,) - 0=后门, 1=正常
-        }, name)
-
-        return
     def print_bn_running_stats(self):
         """
         遍历模型，输出每个BN层的 running_mean 和 running_var 的统计信息
@@ -325,12 +259,3 @@ class Client(object):
                 bn_count += 1
                 mean_list.append(mean_diff)
         print("mean_diff is",mean_list)
-        # if bn_count > 0:
-        #     # 输出整体的L2范数（所有BN层差异的平方和开根号）
-        #     overall_mean_diff = total_mean_diff ** 0.5
-        #     overall_var_diff = total_var_diff ** 0.5
-        #     print(f"\n=== 整体统计 ({bn_count} 个BN层) ===")
-        #     print(f"running_mean 整体L2 diff: {overall_mean_diff:.6f}")
-        #     print(f"running_var 整体L2 diff: {overall_var_diff:.6f}")
-        # else:
-        #     print("未找到BN层")
