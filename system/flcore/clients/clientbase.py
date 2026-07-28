@@ -7,7 +7,7 @@ import os
 from torch.utils.data import DataLoader,ConcatDataset,TensorDataset
 from sklearn.preprocessing import label_binarize
 from sklearn import metrics
-from utils.data_utils import read_client_data,create_poisoned_dataset,backdoor_pattern
+from utils.data_utils import read_client_data,create_poisoned_dataset,backdoor_pattern, get_poisoned_dataset
 
 
 class Client(object):
@@ -70,15 +70,45 @@ class Client(object):
         )
         self.learning_rate_decay = args.learning_rate_decay
 
+        # ==================== 数据投毒分发工具函数 ====================
+        def _get_poisoned_data(self, origin_data, is_train):
+            """
+            根据数据集类型自动路由到图像投毒或文本投毒
+            """
+            # 判断是否为文本任务
+            if "News" in self.dataset or "Text" in self.dataset or "AG" in self.dataset:
+                # 文本投毒 (默认 trigger_id=2，可自定)
+                return create_poisoned_text_dataset(
+                    origin_data=origin_data,
+                    poison_flag=self.poison_flag,
+                    is_train=is_train,
+                    trigger_id=2
+                )
+            else:
+                # 图像投毒
+                return create_poisoned_dataset(
+                    dataset=origin_data,
+                    poison_flag=self.poison_flag,
+                    is_train=is_train
+                )
+
 
     def load_train_data(self, batch_size=None,poison=False):
         if batch_size == None:
             batch_size = self.batch_size
         train_data = read_client_data(self.dataset, self.id, is_train=True)
-        if(self.unlearning and poison):
-            # 我们这里poison_flag 随便选择一个
-            train_data = create_poisoned_dataset(train_data,self.poison_flag,is_train=True)
-            # pass
+        # if(self.unlearning and poison):
+        #     # 我们这里poison_flag 随便选择一个
+        #     train_data = create_poisoned_dataset(train_data,self.poison_flag,is_train=True)
+        #     # pass
+        if self.unlearning and poison:
+            # 替换原本的 create_poisoned_dataset，改成 get_poisoned_dataset 自动分发
+            train_data = get_poisoned_dataset(
+                dataset_name=self.dataset,
+                origin_data=train_data,
+                poison_flag=self.poison_flag,
+                is_train=True
+            )
             
         return DataLoader(train_data, batch_size, drop_last=True, shuffle=True)
 
@@ -86,9 +116,17 @@ class Client(object):
         if batch_size == None:
             batch_size = self.batch_size
         test_data = read_client_data(self.dataset, self.id, is_train=False)
-        if(self.unlearning and poison):
-            test_data = create_poisoned_dataset(test_data,self.poison_flag,is_train=False)
-            # pass
+        # if(self.unlearning and poison):
+        #     test_data = create_poisoned_dataset(test_data,self.poison_flag,is_train=False)
+        #     # pass
+        if self.unlearning and poison:
+            # 替换原本的 create_poisoned_dataset，改成 get_poisoned_dataset 自动分发
+            test_data = get_poisoned_dataset(
+                dataset_name=self.dataset,
+                origin_data=test_data,
+                poison_flag=self.poison_flag,
+                is_train=False
+            )
             
         return DataLoader(test_data, batch_size, drop_last=False, shuffle=True)
         

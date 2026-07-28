@@ -134,3 +134,46 @@ def backdoor_pattern(imgs):
     for img in imgs:
         img[:,2:9,2:9]=0
     return imgs
+
+
+def text_backdoor_pattern(text_inputs, trigger_id=2):
+    poisoned_inputs = []
+    for (x, lens) in text_inputs:
+        x_poison = x.clone()
+        # 1. 在文本开头的第一个 Token 位置强行替换为 Trigger Word 的 ID
+        x_poison[0] = trigger_id
+        lens_poison = torch.max(lens, torch.tensor(1, dtype=lens.dtype))
+        poisoned_inputs.append((x_poison, lens_poison))
+
+    return poisoned_inputs
+
+
+
+def create_poisoned_text_dataset(origin_data, poison_flag, is_train, trigger_id=2):
+    origin_data = 5 * origin_data if is_train else origin_data
+
+    # 1. 解包适配 AGNews 的 ((x, lens), y) 结构
+    clean_inputs = [
+        inputs for inputs, y in origin_data
+        if is_train or (not is_train and y != poison_flag)
+    ]
+
+    # 2. 调用上面的文本 Trigger 注入函数
+    poison_x = text_backdoor_pattern(clean_inputs, trigger_id=trigger_id)
+
+    # 3. 将标签统一强行改写为目标分类 poison_flag
+    poison_y = [torch.tensor(poison_flag, dtype=torch.int64) for _ in poison_x]
+
+    # 4. 重新打包成 PFLlib 文本格式 [((x, lens), y), ...]
+    poison_dataset = [(x, y) for x, y in zip(poison_x, poison_y)]
+
+    return poison_dataset
+
+def get_poisoned_dataset(dataset_name, origin_data, poison_flag, is_train, trigger_id=2):
+    """
+    统一投毒入口：根据数据集名称自动判定调用图像投毒还是文本投毒
+    """
+    if "News" in dataset_name or "Text" in dataset_name or "Shakespeare" in dataset_name:
+        return create_poisoned_text_dataset(origin_data, poison_flag, is_train, trigger_id=trigger_id)
+    else:
+        return create_poisoned_dataset(origin_data, poison_flag, is_train)
