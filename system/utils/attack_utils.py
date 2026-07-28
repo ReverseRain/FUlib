@@ -18,9 +18,12 @@ def attack(target_model, attack_model, unlearning_clients, N_class,device):
         for client in unlearning_clients:
             data_loader=client.train_loader
             for batch_idx, (data, target) in enumerate(data_loader):
-                        data = data.to(device)
-                        out = target_model(data)
-                        unlearn_X = torch.cat([unlearn_X, out])
+                if isinstance(data, (list, tuple)):
+                    data = data[0].to(device)
+                else:
+                    data = data.to(device)
+                out = target_model(data)
+                unlearn_X = torch.cat([unlearn_X, out])
                         
         unlearn_X = unlearn_X[1:,:]
         unlearn_X = F.softmax(unlearn_X,dim = 1)
@@ -38,7 +41,10 @@ def attack(target_model, attack_model, unlearning_clients, N_class,device):
         with torch.no_grad():
             for cliet in unlearning_clients:
                 for _, (data, target) in enumerate(client.test_loader):
-                    data = data.to(device)
+                    if isinstance(data, (list, tuple)):
+                        data = data[0].to(device)
+                    else:
+                        data = data.to(device)
                     out = target_model(data)
                     test_X = torch.cat([test_X, out])
                     
@@ -83,9 +89,12 @@ def train_attack_model(shadow_old_GM, shadow_clients, N_class,device):
             data_loader = client.train_loader
             
             for batch_idx, (data, target) in enumerate(data_loader):
+                if isinstance(data, (list, tuple)):
+                    data = data[0].to(device)
+                else:
                     data = data.to(device)
-                    out = shadow_model(data)
-                    pred_4_mem = torch.cat([pred_4_mem, out])
+                out = shadow_model(data)
+                pred_4_mem = torch.cat([pred_4_mem, out])
     pred_4_mem = pred_4_mem[1:,:]
     pred_4_mem = F.softmax(pred_4_mem,dim = 1)
     pred_4_mem = pred_4_mem.cpu()
@@ -97,7 +106,10 @@ def train_attack_model(shadow_old_GM, shadow_clients, N_class,device):
     with torch.no_grad():
         for client in shadow_clients:
             for _, (data, target) in enumerate(client.test_loader):
-                data = data.to(device)
+                if isinstance(data, (list, tuple)):
+                    data = data[0].to(device)
+                else:
+                    data = data.to(device)
                 out = shadow_model(data)
                 pred_4_nonmem = torch.cat([pred_4_nonmem, out])
     pred_4_nonmem = pred_4_nonmem[1:,:]

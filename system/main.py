@@ -65,6 +65,46 @@ def run(arg):
     elif model_str == "ovr":
         args.model = torchvision.models.resnet18(pretrained=True, num_classes=1000).to(args.device)
         args.model.fc = OVRClassifier(512, args.num_classes).to(args.device)
+    elif model_str == "TextCNN":
+        # 1. 根据文本数据集校准类别数
+        if "AGNews" in args.dataset or "AG_News" in args.dataset:
+            args.num_classes = 4
+
+        # 2. 检查 args 中是否有指定的预训练权重，如果没有，则默认自动构建 Word2Vec 矩阵
+        pretrained_weight = getattr(args, 'pretrained_embeddings', None)
+
+        if pretrained_weight is None:
+            print("[TextCNN] 未指定预训练词向量，正在默认挂载官方 Word2Vec (word2vec-google-news-300)...")
+            try:
+                import gensim.downloader as api
+                # 经典词向量维度固定为 300，需要同步更新特征维度
+                args.feature_dim = 300
+
+                # 首次运行会自动从 Gensim 下载 (约 1.6GB) 并缓存到本地 ~/.gensim-data/
+                w2v_model = api.load("word2vec-google-news-300")
+
+                # 根据 args.vocab_size 建立对齐的权重矩阵 [vocab_size, 300]
+                # 未匹配到的词默认用均值为0、方差为 0.25 的均匀分布随机初始化
+                pretrained_weight = np.random.uniform(-0.25, 0.25, (args.vocab_size, args.feature_dim))
+
+                # 如果有具体的 tokenizer/word2idx，可在此处做精确匹配；
+                # 若未对齐词表，通常从 0 到 min(vocab_size, len(w2v)) 批量拷贝权重
+                w2v_vectors = w2v_model.vectors
+                copy_len = min(args.vocab_size, len(w2v_vectors))
+                pretrained_weight[:copy_len] = w2v_vectors[:copy_len]
+
+                print(f"[TextCNN] 成功挂载 Word2Vec 矩阵，Shape 为: {pretrained_weight.shape}")
+            except Exception as e:
+                print(f"[TextCNN] 自动挂载 Word2Vec 失败: {e}。将退回随机初始化模式。")
+                pretrained_weight = None
+
+        # 3. 实例化 TextCNN 模型
+        args.model = TextCNN(
+            hidden_dim=args.feature_dim,
+            vocab_size=args.vocab_size,
+            num_classes=args.num_classes,
+            pretrained_embeddings=pretrained_weight
+        ).to(args.device)
 
 
 
@@ -256,6 +296,10 @@ if __name__ == "__main__":
                         help='Number of epochs for server-side disentanglement tuning (论文默认 5)') # dis_epoch设置为0关闭知识解耦
     parser.add_argument('-unlearn_rate', type=float, default=0.005,
                         help='Learning rate for joint multi-objective unlearning optimization')
+
+    parser.add_argument('-w2v', "--word2vec_type", type=str, default="google-news",
+                        choices=["google-news", "glove", "none"],
+                        help="Pretrained embeddings type for TextCNN")
     
     args = parser.parse_args()
 

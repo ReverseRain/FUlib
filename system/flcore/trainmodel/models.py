@@ -203,6 +203,115 @@ class KMeans:
         X = np.array(X)
         return self._assign_clusters(X)
 
+
+# ====================================================================================================================
+
+# class TextCNN(nn.Module):
+#     def __init__(self, hidden_dim, num_channels=100, kernel_size=[3, 4, 5], max_len=200, dropout=0.8,
+#                  padding_idx=0, vocab_size=98635, num_classes=10):
+#         super(TextCNN, self).__init__()
+#
+#         # Embedding Layer
+#         self.embedding = nn.Embedding(vocab_size, hidden_dim, padding_idx)
+#
+#         # This stackoverflow thread clarifies how conv1d works
+#         # https://stackoverflow.com/questions/46503816/keras-conv1d-layer-parameters-filters-and-kernel-size/46504997
+#         self.conv1 = nn.Sequential(
+#             nn.Conv1d(in_channels=hidden_dim, out_channels=num_channels, kernel_size=kernel_size[0]),
+#             nn.ReLU(),
+#             nn.MaxPool1d(max_len - kernel_size[0] + 1)
+#         )
+#         self.conv2 = nn.Sequential(
+#             nn.Conv1d(in_channels=hidden_dim, out_channels=num_channels, kernel_size=kernel_size[1]),
+#             nn.ReLU(),
+#             nn.MaxPool1d(max_len - kernel_size[1] + 1)
+#         )
+#         self.conv3 = nn.Sequential(
+#             nn.Conv1d(in_channels=hidden_dim, out_channels=num_channels, kernel_size=kernel_size[2]),
+#             nn.ReLU(),
+#             nn.MaxPool1d(max_len - kernel_size[2] + 1)
+#         )
+#
+#         self.dropout = nn.Dropout(dropout)
+#
+#         # Fully-Connected Layer
+#         self.fc = nn.Linear(num_channels * len(kernel_size), num_classes)
+#
+#     def forward(self, x):
+#         if type(x) == type([]):
+#             text, _ = x
+#         else:
+#             text = x
+#
+#         embedded_sent = self.embedding(text).permute(0, 2, 1)
+#
+#         conv_out1 = self.conv1(embedded_sent).squeeze(2)
+#         conv_out2 = self.conv2(embedded_sent).squeeze(2)
+#         conv_out3 = self.conv3(embedded_sent).squeeze(2)
+#
+#         all_out = torch.cat((conv_out1, conv_out2, conv_out3), 1)
+#         final_feature_map = self.dropout(all_out)
+#         out = self.fc(final_feature_map)
+#         out = F.log_softmax(out, dim=1)
+#
+#         return out
+
+
+
+
+class TextCNN(nn.Module):
+    def __init__(self, hidden_dim=300, num_channels=100, kernel_size=[3, 4, 5],
+                 dropout=0.5, padding_idx=0, vocab_size=32000, num_classes=4,
+                 pretrained_embeddings=None, freeze_embedding=False, **kwargs):
+        super(TextCNN, self).__init__()
+
+        # 1. Embedding 层
+        if pretrained_embeddings is not None:
+            self.embedding = nn.Embedding.from_pretrained(
+                torch.tensor(pretrained_embeddings, dtype=torch.float32),
+                freeze=freeze_embedding,
+                padding_idx=padding_idx
+            )
+            hidden_dim = self.embedding.embedding_dim
+        else:
+            self.embedding = nn.Embedding(vocab_size, hidden_dim, padding_idx=padding_idx)
+
+        # 2. 卷积层 + 自适应池化 (解耦序列长度)
+        self.convs = nn.ModuleList([
+            nn.Sequential(
+                nn.Conv1d(in_channels=hidden_dim, out_channels=num_channels, kernel_size=k),
+                nn.ReLU(),
+                nn.AdaptiveMaxPool1d(1)
+            ) for k in kernel_size
+        ])
+
+        self.dropout = nn.Dropout(dropout)
+
+        # 3. 分类头 (必须命名为 fc，方便 BaseHeadSplit 剥离)
+        self.fc = nn.Linear(num_channels * len(kernel_size), num_classes)
+
+    def forward(self, x):
+        if isinstance(x, (tuple, list)):
+            text = x[0]
+        else:
+            text = x
+
+        embedded = self.embedding(text).permute(0, 2, 1)  # [B, dim, seq_len]
+        conv_outs = [conv(embedded).squeeze(2) for conv in self.convs]
+
+        # 提取池化后的联合特征向量
+        feat = torch.cat(conv_outs, dim=1)
+        feat = self.dropout(feat)
+
+        # 计算逻辑输出 (Logits)
+        out = self.fc(feat)
+        return out
+
+
+
+
+
+
 # ====================================================================================================================
 
 # class BasicBlock(nn.Module):
