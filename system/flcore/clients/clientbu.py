@@ -60,6 +60,7 @@ class clientBU(Client):
         
         gm = torch.cat([p.data.view(-1) for p in self.model.parameters()], dim=0)
         clean_loader=self.load_train_data()
+        initail_model = copy.deepcopy(self.model)
         for epoch in range(max_local_epochs):
             for (x_pois, y_pois),(x,y) in zip(self.train_loader,clean_loader):
                 if type(x) == type([]):
@@ -99,5 +100,5 @@ class clientBU(Client):
                 total_loss.backward()
                 torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=10.0)
                 self.optimizer_ul.step()
-
+            self.print_grad(initail_model)
 

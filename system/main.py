@@ -60,6 +60,9 @@ def run(arg):
         elif "Cifar10" in args.dataset:
             args.model = torchvision.models.resnet34(pretrained=True, num_classes=1000).to(args.device)
             args.model.fc = torch.nn.Linear(args.model.fc.in_features, args.num_classes).to(args.device)
+    elif model_str == "resnet50": 
+        args.model = torchvision.models.resnet50(pretrained=True, num_classes=1000).to(args.device)
+        args.model.fc = torch.nn.Linear(args.model.fc.in_features, args.num_classes).to(args.device)
     elif model_str == "mlp":
         args.model = MLP(in_features=3*32*32 if "Cifar10" in args.dataset else 10,num_classes=args.num_classes, hidden_dim=2).to(args.device)
     elif model_str == "ovr":
@@ -273,6 +276,8 @@ if __name__ == "__main__":
     torch.cuda.manual_seed(args.seed_num)      
     torch.cuda.manual_seed_all(args.seed_num)
     # tracemalloc.start()
+    # if args.device == "cuda" and torch.cuda.is_available():
+    #     torch.cuda.reset_peak_memory_stats()
 
     # with torch.profiler.profile(
     #     activities=[
@@ -284,5 +289,10 @@ if __name__ == "__main__":
     # with torch.autograd.profiler.profile(profile_memory=True) as prof:
     run(args)
     # current, peak = tracemalloc.get_traced_memory()
-    # print(f"Current memory usage: {current / 10**6} MB")
-    # print(f"Peak memory usage: {peak / 10**6} MB")
+    # print(f"[Python Heap] Current memory: {current / 10**6:.2f} MB")
+    # print(f"[Python Heap] Peak memory: {peak / 10**6:.2f} MB")
+
+    # if args.device == "cuda" and torch.cuda.is_available():
+    #     print(f"[GPU] Current allocated: {torch.cuda.memory_allocated() / 10**6:.2f} MB")
+    #     print(f"[GPU] Peak allocated: {torch.cuda.max_memory_allocated() / 10**6:.2f} MB")
+    # print(f"[GPU] Cached (reserved): {torch.cuda.memory_reserved() / 10**6:.2f} MB")

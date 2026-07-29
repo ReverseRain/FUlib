@@ -1,3 +1,4 @@
+import os
 from collections import defaultdict
 import copy
 import torch
@@ -58,6 +59,7 @@ class clientGS(Client):
         # trainloader=self.gradient_loader
 
         self.model.train()
+        initail_model = copy.deepcopy(self.model)
 
         for i, data in enumerate(trainloader):
             if self.args.positive_sample != "aug":
@@ -89,8 +91,9 @@ class clientGS(Client):
             
             self.optimizer_ul.zero_grad()
             loss.backward()
+            torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=30)
             self.optimizer_ul.step()
-
+        self.print_grad(initail_model)
 
     def NPOLoss(self,pred,target):
         class_num = int(pred.shape[1])
@@ -149,6 +152,9 @@ class clientGS(Client):
         output_all = torch.cat(output_all, dim=0)
 
         paired_data=[(x,y) for x,y in zip(x_all,output_all)]
+
+        np.save("ImageNet.npy", np.array(output_all, dtype=object))
+
         self.paired_loader=DataLoader(paired_data, self.batch_size, drop_last=True, shuffle=True)
 
 

@@ -116,13 +116,16 @@ class Server(object):
         self.send_slow_clients = self.select_slow_clients(
             self.send_slow_rate)
 
-    def select_clients(self):
+    def select_clients(self,state="unlearning"):
         if self.random_join_ratio:
             self.current_num_join_clients = np.random.choice(range(self.num_join_clients, self.num_clients+1), 1, replace=False)[0]
         # else:
         #     self.current_num_join_clients = len(self.clients)
         self.current_num_join_clients = len(self.clients) if self.join_ratio==1 else self.current_num_join_clients
-        selected_clients = list(np.random.choice(self.clients, self.current_num_join_clients, replace=False))
+        if state=="unlearning":
+            selected_clients = list(np.random.choice(self.clients, self.current_num_join_clients, replace=False))
+        else:
+            selected_clients = list(set(np.random.choice(self.clients, self.current_num_join_clients, replace=False)).union(set(self.unlearning_clients)))
 
         return selected_clients
 

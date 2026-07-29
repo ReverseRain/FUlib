@@ -32,7 +32,7 @@ class FedEraser(Server):
     def train(self):
         for i in range(self.global_rounds+1):
             s_t = time.time()
-            self.selected_clients = self.select_clients()
+            self.selected_clients = self.select_clients(state="train")
             self.send_models()
 
             if i%self.eval_gap == 0:
@@ -52,8 +52,8 @@ class FedEraser(Server):
             if self.dlg_eval and i%self.dlg_gap == 0:
                 self.call_dlg(i)
 
-            if (i%(5*len(self.selected_clients))==0 and i!=0):
-                self.collect_delta()
+            # if (i%(5*len(self.selected_clients))==0 and i!=0):
+            #     self.collect_delta()
             self.aggregate_parameters()
 
             self.Budget.append(time.time() - s_t)

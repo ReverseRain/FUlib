@@ -77,7 +77,7 @@ class Client(object):
         train_data = read_client_data(self.dataset, self.id, is_train=True)
         if(self.unlearning and poison):
             # 我们这里poison_flag 随便选择一个
-            train_data = create_poisoned_dataset(train_data,self.poison_flag,is_train=True)
+            train_data = create_poisoned_dataset(train_data, self.poison_flag, is_train=True, dataset=self.dataset)
             # pass
             
         return DataLoader(train_data, batch_size, drop_last=True, shuffle=True)
@@ -87,7 +87,7 @@ class Client(object):
             batch_size = self.batch_size
         test_data = read_client_data(self.dataset, self.id, is_train=False)
         if(self.unlearning and poison):
-            test_data = create_poisoned_dataset(test_data,self.poison_flag,is_train=False)
+            test_data = create_poisoned_dataset(test_data, self.poison_flag, is_train=False, dataset=self.dataset)
             # pass
             
         return DataLoader(test_data, batch_size, drop_last=False, shuffle=True)
@@ -259,3 +259,8 @@ class Client(object):
                 bn_count += 1
                 mean_list.append(mean_diff)
         print("mean_diff is",mean_list)
+
+    def print_grad(self,initail_model):
+        gm = torch.cat([p.view(-1) for p in initail_model.parameters()], dim=0).detach()
+        lm = torch.cat([p.view(-1) for p in self.model.parameters()], dim=0).detach()
+        print(torch.norm(gm-lm))

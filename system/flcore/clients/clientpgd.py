@@ -56,6 +56,7 @@ class clientPGD(Client):
         max_local_epochs = self.local_epochs
         w_ref = torch.cat([p.data.view(-1) for p in self.model.parameters()], dim=0)
         theta=0.1 
+        initail_model = copy.deepcopy(self.model)
         print("theta is ",theta)
         for epoch in range(max_local_epochs):
             for i, (x, y) in enumerate(self.train_loader):
@@ -75,7 +76,7 @@ class clientPGD(Client):
                 w = torch.cat([p.data.view(-1) for p in self.model.parameters()], dim=0)
                 w=self.projection(w,w_ref,theta)
                 self.load_flattened_vector_to_model(self.model,w)
-        
+        self.print_grad(initail_model)
 
     def projection(self,w, w_ref, theta):
         delta = w - w_ref

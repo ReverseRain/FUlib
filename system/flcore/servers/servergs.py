@@ -15,6 +15,7 @@ from utils.attack_utils import attack,train_attack_model
 import math
 
 import matplotlib.pyplot as plt
+import tracemalloc
 
 class FedGS(Server):
     def __init__(self, args):
@@ -140,6 +141,7 @@ class FedGS(Server):
             start = time.time()
             if self.args.gradient_hadle == "GEM":
                 unlearning_grad=self.PROJECT(self.unlearning_grad,self.normal_grad)
+
             elif self.args.gradient_hadle == "OSD":
                 self.normal_grad = [grad.to(dtype=torch.float32) for grad in self.normal_grad]
                 G = torch.stack(self.normal_grad, dim=0)
@@ -148,6 +150,7 @@ class FedGS(Server):
                 unlearning_grad = self.unlearning_grad
                 
             print("gradient handle time:   ",time.time()-start)
+            print("unlearning grad norm:   ",torch.norm(unlearning_grad))
             self.overwrite_grad(self.global_model.parameters,unlearning_grad)
             
             # self.cka_analyse()
@@ -206,12 +209,21 @@ class FedGS(Server):
             # t=t*0.99
         
         g_tilde = g + torch.mv(G.T, v)  # [num_params]
-        angles = [round((torch.dot(grad,g_tilde)/(torch.norm(grad)*torch.norm(g_tilde))).item(),3) for grad in old_gradients]
+        
+        B_t = torch.norm(g - g_tilde) / (torch.norm(g_tilde) + 1e-8)
+        print("projection burden: {:.6f}".format(B_t.item()))
+        angles = [round((torch.dot(grad,g)/(torch.norm(grad)*torch.norm(g))).item(),3) for grad in old_gradients]
+
+        violation_magnitude = np.mean([max(0, -cos_val) for cos_val in angles])
+        print("Violation Magnitude: {:.4f}".format(violation_magnitude))
         angles_deg = [round(math.degrees(math.acos(cos)), 2) for cos in angles]
 
         angles_less_90 = [a for a in angles_deg if a < 90]
 
         ratio = len(angles_less_90) / len(angles_deg)
+        print("Ratio of angles less than 90 degrees: {:.2f}".format(ratio))
+        print("before L2 norm ",torch.norm(g))
+        
         # mean_ang=np.mean(angles)
         # print('after ',mean_ang)
         # min_angle= np.min(angles)
