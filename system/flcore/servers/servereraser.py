@@ -52,8 +52,8 @@ class FedEraser(Server):
             if self.dlg_eval and i%self.dlg_gap == 0:
                 self.call_dlg(i)
 
-            # if (i%(5*len(self.selected_clients))==0 and i!=0):
-            #     self.collect_delta()
+            if (i%(5*len(self.selected_clients))==0 and i!=0):
+                self.collect_delta()
             self.aggregate_parameters()
 
             self.Budget.append(time.time() - s_t)

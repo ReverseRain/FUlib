@@ -11,6 +11,8 @@ from torch.utils.data import DataLoader
 import random
 from utils.data_utils import read_client_data
 from flcore.clients.clientbase import Client
+from utils.privacy import *
+import gc
 
 
 class clientGS(Client):
@@ -59,7 +61,19 @@ class clientGS(Client):
         # trainloader=self.gradient_loader
 
         self.model.train()
-        initail_model = copy.deepcopy(self.model)
+        # initail_model = copy.deepcopy(self.model)
+        # torch.cuda.empty_cache()
+        # if self.privacy:
+        #     model_origin = copy.deepcopy(self.model)
+        #     self.model, self.optimizer_ul, trainloader, privacy_engine = \
+        #         initialize_dp(self.model, self.optimizer_ul, trainloader, self.dp_sigma)
+
+        # 首次进入时初始化隐私会计（用于统计 (epsilon, delta)）
+        if self.privacy and self.first_time:
+            init_dp_accountant()
+            self.first_time = False
+
+        total_samples = getattr(self, 'train_samples', 1) or 1
 
         for i, data in enumerate(trainloader):
             if self.args.positive_sample != "aug":
@@ -91,9 +105,20 @@ class clientGS(Client):
             
             self.optimizer_ul.zero_grad()
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=30)
+            # torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=30)
+            if self.privacy:
+                apply_dp_gradients(self.model, self.dp_sigma)
+                # 记录一步隐私消耗：sample_rate = batch_size / total_samples
+                log_dp_step(self.dp_sigma, x.shape[0], total_samples)
+                
             self.optimizer_ul.step()
-        self.print_grad(initail_model)
+
+        # 打印当前累计的隐私预算 (epsilon, delta)
+        if self.privacy:
+            epsilon, delta = get_epsilon_delta(delta=DELTA)
+            print(f"[client {self.id}] DP privacy budget: epsilon={epsilon:.4f}, delta={delta:.2e}")
+            
+        torch.cuda.empty_cache()
 
     def NPOLoss(self,pred,target):
         class_num = int(pred.shape[1])
@@ -133,60 +158,170 @@ class clientGS(Client):
         loss+=(-1*torch.mean(torch.log(torch.sigmoid(torch.sum(torch.mul(pred , target_aug /t),dim=1)))))
         return loss
     
+    # def getPairLoader(self):
+    #     x_all=[]
+    #     output_all=[]
+    #     with torch.no_grad():
+    #         for i, (x, y) in enumerate(self.train_loader):
+    #             if type(x) == type([]):
+    #                 x[0] = x[0].to(self.device)
+    #             else:
+    #                 x = x.to(self.device)
+    #             output = self.model(x)
+    #             output = F.softmax(output, dim=-1)
+    #
+    #             x_all.append(x.cpu())
+    #             output_all.append(output.cpu())
+    #
+    #     x_all = torch.cat(x_all, dim=0)
+    #     output_all = torch.cat(output_all, dim=0)
+    #
+    #     paired_data=[(x,y) for x,y in zip(x_all,output_all)]
+    #     self.paired_loader=DataLoader(paired_data, self.batch_size, drop_last=True, shuffle=True)
+
     def getPairLoader(self):
-        x_all=[]
-        output_all=[]
+        x_all = []
+        output_all = []
         with torch.no_grad():
             for i, (x, y) in enumerate(self.train_loader):
-                if type(x) == type([]):
-                    x[0] = x[0].to(self.device)
+                # 兼容文本（List）和图像（Tensor）的数据输入
+                if isinstance(x, (list, tuple)):
+                    x_input = x[0].to(self.device)
                 else:
-                    x = x.to(self.device)
-                output = self.model(x)
+                    x_input = x.to(self.device)
+
+                output = self.model(x_input)
                 output = F.softmax(output, dim=-1)
 
-                x_all.append(x.cpu())
+                # 如果 x 是 List，对其中的 Tensor 逐个转到 cpu
+                if isinstance(x, (list, tuple)):
+                    x_cpu = [item.cpu() if isinstance(item, torch.Tensor) else item for item in x]
+                else:
+                    x_cpu = x.cpu()
+
+                x_all.append(x_cpu)
                 output_all.append(output.cpu())
 
-        x_all = torch.cat(x_all, dim=0)
+        # 拼接数据：判断 x 是 List（文本）还是 Tensor（图像）
+        if isinstance(x_all[0], (list, tuple)):
+            # 对 List 内部的各部分分别拼接（如 text_tensor 拼接，lengths 拼接）
+            num_elements = len(x_all[0])
+            x_cat = []
+            for idx in range(num_elements):
+                x_cat.append(torch.cat([batch[idx] for batch in x_all], dim=0))
+        else:
+            x_cat = torch.cat(x_all, dim=0)
+
         output_all = torch.cat(output_all, dim=0)
 
-        paired_data=[(x,y) for x,y in zip(x_all,output_all)]
+        # 构建 Dataset / paired_loader
+        if isinstance(x_cat, list):
+            zipped_x = list(zip(*x_cat))
+            paired_data = [(list(x_item), y) for x_item, y in zip(zipped_x, output_all)]
+        else:
+            paired_data = [(x, y) for x, y in zip(x_cat, output_all)]
 
-        np.save("ImageNet.npy", np.array(output_all, dtype=object))
+        self.paired_loader = DataLoader(
+            paired_data,
+            self.batch_size,
+            drop_last=True,
+            shuffle=True
+        )
 
-        self.paired_loader=DataLoader(paired_data, self.batch_size, drop_last=True, shuffle=True)
-
+    # def getPairLoader2(self):
+    #     x_all=[]
+    #     output_all=[]
+    #     output_aug_all=[]
+    #     with torch.no_grad():
+    #         for i, (x, y) in enumerate(self.train_loader):
+    #             if type(x) == type([]):
+    #                 x[0] = x[0].to(self.device)
+    #             else:
+    #                 x = x.to(self.device)
+    #             output = self.model(x)
+    #             output = F.softmax(output, dim=-1)
+    #
+    #             angles = [30 for _ in range(x.shape[0])]
+    #             x_aug = torch.stack([TF.rotate(img, angle) for img, angle in zip(x, angles)]).to(self.device)
+    #
+    #             noise = torch.rand(x.shape[1], x.shape[2], x.shape[3]) * 0.2
+    #             x_aug = x_aug + noise.unsqueeze(0).repeat(x.shape[0], 1, 1, 1).to(self.device)
+    #
+    #             output_aug = self.model(x_aug)
+    #             output_aug = F.softmax(output_aug, dim=-1)
+    #
+    #             x_all.append(x.cpu())
+    #             output_all.append(output.cpu())
+    #             output_aug_all.append(output_aug.cpu())
+    #
+    #     x_all = torch.cat(x_all, dim=0)
+    #     output_all = torch.cat(output_all, dim=0)
+    #     output_aug_all = torch.cat(output_aug_all, dim=0)
+    #
+    #     paired_data=[(x,y,y_aug) for x,y,y_aug in zip(x_all,output_all,output_aug_all)]
+    #     self.paired_loader=DataLoader(paired_data, self.batch_size, drop_last=True, shuffle=True)
 
     def getPairLoader2(self):
-        x_all=[]
-        output_all=[]
-        output_aug_all=[]
+        x_all = []
+        output_all = []
+        output_aug_all = []
         with torch.no_grad():
             for i, (x, y) in enumerate(self.train_loader):
-                if type(x) == type([]):
-                    x[0] = x[0].to(self.device)
+                if isinstance(x, (list, tuple)):
+                    x_input = x[0].to(self.device)
+                    is_text = True
                 else:
-                    x = x.to(self.device)
-                output = self.model(x)
+                    x_input = x.to(self.device)
+                    is_text = False
+
+                output = self.model(x_input)
                 output = F.softmax(output, dim=-1)
 
-                angles = [30 for _ in range(x.shape[0])]
-                x_aug = torch.stack([TF.rotate(img, angle) for img, angle in zip(x, angles)]).to(self.device)
-
-                noise = torch.rand(x.shape[1], x.shape[2], x.shape[3]) * 0.2
-                x_aug = x_aug + noise.unsqueeze(0).repeat(x.shape[0], 1, 1, 1).to(self.device)
+                # 区分文本与图像的数据增强
+                if is_text:
+                    # 文本增强：可以通过微小的 Embedding/Word 扰动，或直接暂用原输入
+                    x_aug = x_input
+                else:
+                    # 图像增强：旋转与加噪
+                    angles = [30 for _ in range(x_input.shape[0])]
+                    x_aug = torch.stack([TF.rotate(img, angle) for img, angle in zip(x_input, angles)]).to(self.device)
+                    noise = torch.rand(x_input.shape[1], x_input.shape[2], x_input.shape[3]) * 0.2
+                    x_aug = x_aug + noise.unsqueeze(0).repeat(x_input.shape[0], 1, 1, 1).to(self.device)
 
                 output_aug = self.model(x_aug)
                 output_aug = F.softmax(output_aug, dim=-1)
 
-                x_all.append(x.cpu())
+                if isinstance(x, (list, tuple)):
+                    x_cpu = [item.cpu() if isinstance(item, torch.Tensor) else item for item in x]
+                else:
+                    x_cpu = x.cpu()
+
+                x_all.append(x_cpu)
                 output_all.append(output.cpu())
                 output_aug_all.append(output_aug.cpu())
 
-        x_all = torch.cat(x_all, dim=0)
+        # 拼接数据
+        if isinstance(x_all[0], (list, tuple)):
+            num_elements = len(x_all[0])
+            x_cat = []
+            for idx in range(num_elements):
+                x_cat.append(torch.cat([batch[idx] for batch in x_all], dim=0))
+        else:
+            x_cat = torch.cat(x_all, dim=0)
+
         output_all = torch.cat(output_all, dim=0)
         output_aug_all = torch.cat(output_aug_all, dim=0)
 
-        paired_data=[(x,y,y_aug) for x,y,y_aug in zip(x_all,output_all,output_aug_all)]
-        self.paired_loader=DataLoader(paired_data, self.batch_size, drop_last=True, shuffle=True)    
+        if isinstance(x_cat, list):
+            zipped_x = list(zip(*x_cat))
+            paired_data = [(list(x_item), y, y_aug) for x_item, y, y_aug in zip(zipped_x, output_all, output_aug_all)]
+        else:
+            paired_data = [(x, y, y_aug) for x, y, y_aug in zip(x_cat, output_all, output_aug_all)]
+
+        self.paired_loader = DataLoader(
+            paired_data,
+            self.batch_size,
+            drop_last=True,
+            shuffle=True,
+            collate_fn=self.train_loader.collate_fn if hasattr(self.train_loader, 'collate_fn') else None
+        )

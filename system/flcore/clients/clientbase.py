@@ -7,7 +7,7 @@ import os
 from torch.utils.data import DataLoader,ConcatDataset,TensorDataset
 from sklearn.preprocessing import label_binarize
 from sklearn import metrics
-from utils.data_utils import read_client_data,create_poisoned_dataset,backdoor_pattern
+from utils.data_utils import read_client_data,backdoor_pattern, get_poisoned_dataset
 
 
 class Client(object):
@@ -70,15 +70,23 @@ class Client(object):
         )
         self.learning_rate_decay = args.learning_rate_decay
 
+        self.privacy = args.privacy
+        self.dp_sigma = args.dp_sigma
+
 
     def load_train_data(self, batch_size=None,poison=False):
         if batch_size == None:
             batch_size = self.batch_size
         train_data = read_client_data(self.dataset, self.id, is_train=True)
-        if(self.unlearning and poison):
-            # 我们这里poison_flag 随便选择一个
-            train_data = create_poisoned_dataset(train_data, self.poison_flag, is_train=True, dataset=self.dataset)
-            # pass
+
+        if self.unlearning and poison:
+            # 替换原本的 create_poisoned_dataset，改成 get_poisoned_dataset 自动分发
+            train_data = get_poisoned_dataset(
+                dataset_name=self.dataset,
+                origin_data=train_data,
+                poison_flag=self.poison_flag,
+                is_train=True
+            )
             
         return DataLoader(train_data, batch_size, drop_last=True, shuffle=True)
 
@@ -86,9 +94,14 @@ class Client(object):
         if batch_size == None:
             batch_size = self.batch_size
         test_data = read_client_data(self.dataset, self.id, is_train=False)
-        if(self.unlearning and poison):
-            test_data = create_poisoned_dataset(test_data, self.poison_flag, is_train=False, dataset=self.dataset)
-            # pass
+        if self.unlearning and poison:
+            # 替换原本的 create_poisoned_dataset，改成 get_poisoned_dataset 自动分发
+            test_data = get_poisoned_dataset(
+                dataset_name=self.dataset,
+                origin_data=test_data,
+                poison_flag=self.poison_flag,
+                is_train=False
+            )
             
         return DataLoader(test_data, batch_size, drop_last=False, shuffle=True)
         

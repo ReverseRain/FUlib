@@ -5,7 +5,7 @@ import numpy as np
 import time
 import torch.nn.functional as F
 from flcore.clients.clientbase import Client
-
+from utils.privacy import *
 
 class clientPGD(Client):
     def __init__(self, args, id, train_samples, test_samples, **kwargs):
@@ -58,6 +58,10 @@ class clientPGD(Client):
         theta=0.1 
         initail_model = copy.deepcopy(self.model)
         print("theta is ",theta)
+        if self.privacy:
+            model_origin = copy.deepcopy(self.model)
+            self.model, self.optimizer_ul, trainloader, privacy_engine = \
+                initialize_dp(self.model, self.optimizer_ul, trainloader, self.dp_sigma)
         for epoch in range(max_local_epochs):
             for i, (x, y) in enumerate(self.train_loader):
                 if type(x) == type([]):

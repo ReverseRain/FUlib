@@ -5,7 +5,7 @@ import numpy as np
 import time
 import torch.nn.functional as F
 from flcore.clients.clientbase import Client
-
+from utils.privacy import *
 
 class clientOSD(Client):
     def __init__(self, args, id, train_samples, test_samples, **kwargs):
@@ -52,6 +52,10 @@ class clientOSD(Client):
         self.model.train()
         
         start_time = time.time()
+        if self.privacy:
+            model_origin = copy.deepcopy(self.model)
+            self.model, self.optimizer_ul, trainloader, privacy_engine = \
+                initialize_dp(self.model, self.optimizer_ul, trainloader, self.dp_sigma)
 
         max_local_epochs = self.local_epochs
         normal_output=(torch.ones(self.num_classes) / self.num_classes).to(self.device)
