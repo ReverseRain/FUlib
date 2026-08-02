@@ -106,17 +106,17 @@ class clientGS(Client):
             self.optimizer_ul.zero_grad()
             loss.backward()
             # torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=30)
-            if self.privacy:
-                apply_dp_gradients(self.model, self.dp_sigma)
-                # 记录一步隐私消耗：sample_rate = batch_size / total_samples
-                log_dp_step(self.dp_sigma, x.shape[0], total_samples)
+            # if self.privacy:
+            #     apply_dp_gradients(self.model, self.dp_sigma)
+            #     # 记录一步隐私消耗：sample_rate = batch_size / total_samples
+            #     log_dp_step(self.dp_sigma, x.shape[0], total_samples)
                 
             self.optimizer_ul.step()
 
         # 打印当前累计的隐私预算 (epsilon, delta)
-        if self.privacy:
-            epsilon, delta = get_epsilon_delta(delta=DELTA)
-            print(f"[client {self.id}] DP privacy budget: epsilon={epsilon:.4f}, delta={delta:.2e}")
+        # if self.privacy:
+        #     epsilon, delta = get_epsilon_delta(delta=DELTA)
+        #     print(f"[client {self.id}] DP privacy budget: epsilon={epsilon:.4f}, delta={delta:.2e}")
             
         torch.cuda.empty_cache()
 

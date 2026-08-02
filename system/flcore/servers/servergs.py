@@ -16,6 +16,7 @@ import math
 
 import matplotlib.pyplot as plt
 import tracemalloc
+from utils.privacy import *
 
 class FedGS(Server):
     def __init__(self, args):
@@ -132,11 +133,22 @@ class FedGS(Server):
                 pm=torch.cat([p.view(-1) for p in weights.parameters()], dim=0).detach()
                 self.unlearning_grad+=(pm-gm)/len(self.uploaded_models)
 
+
             self.normal_grad = []
             self.receive_models()
             for w,weights in zip(self.uploaded_weights,self.uploaded_models):
                 pm=torch.cat([p.view(-1) for p in weights.parameters()], dim=0).detach() 
                 self.normal_grad.append((pm-gm)*w)
+
+            if(self.args.privacy):
+                self.unlearning_grad=apply_dp_gradients_2(self.unlearning_grad,self.args.dp_sigma)
+                for i in range(len(self.normal_grad)):
+                    self.normal_grad[i]=apply_dp_gradients_2(self.normal_grad[i],self.args.dp_sigma)
+                init_dp_accountant()
+                log_dp_step(self.args.dp_sigma, tot_samples, tot_samples)
+
+                epsilon, delta = get_epsilon_delta(delta=DELTA)
+                print(f"[client {0}] DP privacy budget: epsilon={epsilon:.4f}, delta={delta:.2e}")
 
             start = time.time()
             if self.args.gradient_hadle == "GEM":

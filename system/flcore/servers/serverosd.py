@@ -11,6 +11,7 @@ from flcore.servers.serverbase import Server
 from threading import Thread
 from utils.attack_utils import attack,train_attack_model
 
+from utils.privacy import *
 
 class FedOSD(Server):
     def __init__(self, args):
@@ -136,6 +137,15 @@ class FedOSD(Server):
                 self.normal_grad.append(pm-gm)
 
             self.normal_grad = [grad.to(dtype=torch.float32) for grad in self.normal_grad]
+            if(self.args.privacy):
+                self.unlearning_grad=apply_dp_gradients_2(self.unlearning_grad,self.args.dp_sigma)
+                for i in range(len(self.normal_grad)):
+                    self.normal_grad[i]=apply_dp_gradients_2(self.normal_grad[i],self.args.dp_sigma)
+                init_dp_accountant()
+                log_dp_step(self.args.dp_sigma, tot_samples, tot_samples)
+
+                epsilon, delta = get_epsilon_delta(delta=DELTA)
+                print(f"[client {0}] DP privacy budget: epsilon={epsilon:.4f}, delta={delta:.2e}")
             G = torch.stack(self.normal_grad, dim=0)
 
             unlearning_grad=self.get_nearest_oth_d(G,self.unlearning_grad)

@@ -327,7 +327,7 @@ if __name__ == "__main__":
     torch.cuda.manual_seed(args.seed_num)      
     torch.cuda.manual_seed_all(args.seed_num)
     tracemalloc.start()
-    torch.cuda.reset_peak_memory_stats()
+    # torch.cuda.reset_peak_memory_stats()
 
     # with torch.profiler.profile(
     #     activities=[

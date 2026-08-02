@@ -1,7 +1,7 @@
 from opacus import PrivacyEngine
 import torch
 
-MAX_GRAD_NORM = 1.0
+MAX_GRAD_NORM =  0.45
 DELTA = 1e-5
 
 def initialize_dp(model, optimizer, data_loader, dp_sigma):
@@ -39,6 +39,28 @@ def apply_dp_gradients(model, sigma, max_grad_norm=MAX_GRAD_NORM):
             noise_std = sigma * max_grad_norm
             noise = torch.randn_like(p.grad) * noise_std
             p.grad.data.add_(noise)
+
+def apply_dp_gradients_2(unlearning_grad, sigma, max_grad_norm=MAX_GRAD_NORM):
+    """轻量版 DP 加噪（作用于单个 torch.Tensor 梯度向量）。
+
+    对传入的整体梯度向量（如 servergs 中的 self.unlearning_grad）做裁剪 + 高斯加噪：
+      1. 将梯度范数裁剪到 max_grad_norm；
+      2. 加入标准差为 sigma * max_grad_norm 的高斯噪声。
+    原地修改 unlearning_grad 并返回。
+    """
+    print("Applying DP gradients with sigma =", sigma, "and max_grad_norm =", max_grad_norm)
+    total_norm = unlearning_grad.norm(2).item()
+    print("Total gradient norm before clipping:", total_norm,"comp",max_grad_norm / (total_norm + 1e-6))
+    # 裁剪系数：把整体梯度范数压到 max_grad_norm
+    clip_coef = min(1.0, max_grad_norm / (total_norm + 1e-6))
+    print("Clip coefficient:", clip_coef)
+    unlearning_grad.mul_(clip_coef)
+
+    # 加高斯噪声
+    noise_std = sigma * max_grad_norm
+    noise = torch.randn_like(unlearning_grad) * noise_std
+    unlearning_grad.add_(noise)
+    return unlearning_grad
 
 
 # ---------------------------------------------------------------
