@@ -1,30 +1,61 @@
-import time
 import copy
-import os
+import time
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import random
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, TensorDataset
+
 from flcore.clients.clientjellyfish import clientJellyfish
 from flcore.servers.serverbase import Server
-from utils.noise_utils import aggregate_client_noises, create_noise_dataloader, save_proxy_noise
 from utils.attack_utils import attack, train_attack_model
+from utils.noise_utils import aggregate_client_noises, create_noise_dataloader, save_proxy_noise
 
 
 class Jellyfish(Server):
     """
-    Jellyfish: 零样本联邦遗忘学习框架 (论文 4.3 节与 4.4 节全量落地版)
+    Jellyfish Server：面向 whole-client federated unlearning 的基线实现。
 
-    四大阶段:
-      ① 代理数据生成 (Noise Generation)      -- 客户端本地
-      ② 知识解耦 (Knowledge Disentanglement)  -- 服务端
-      ③ 多目标联合遗忘 (Joint Unlearning)     -- 服务端
-      ④ 零样本模型修复 (Model Repair)          -- 可选
+    本实验中的遗忘对象定义：
+        D_f = 目标客户端（或多个目标客户端）的完整本地训练数据；
+        D_r = 所有非目标客户端拥有的保留数据。
+
+    与原论文 category-level 实验的区别：
+        原论文主要验证类别级遗忘；当前实验把一个包含多个 CIFAR-10 类别
+        的 poisoned client 整体视为 D_f。因此这里保持 Jellyfish 原有的
+        class-conditioned proxy 生成与后续遗忘机制，用作 baseline，而不额外
+        注入 trigger-aware、poison-aware 或 gradient-matching 信息。
+
+    Server 端四个阶段：
+        Stage 1  Proxy Noise Generation
+                 目标客户端本地生成 N_f，服务器仅负责聚合。
+
+        Stage 2  Knowledge Disentanglement
+                 在最后卷积层上计算通道 L1 激活，对低重要性通道施加抑制。
+
+        Stage 3  Joint Unlearning
+                 L_unlearn = L_hard + mu_c L_confusion + mu_d L_distillation；
+                 同时使用 Drift、Gradient Mask、Gradient Harmonization。
+
+        Stage 4  Zero-shot Repair（可选）
+                 只允许 remaining clients 生成 N_r，用于修复遗忘造成的 utility
+                 损失；whole-client 删除场景中目标客户端不得参与 repair。
+
+    论文符号在当前 FUlib 项目中的对应关系：
+        omega_0   -> self.initial_model
+        omega_t   -> load_model + send_models + warm_up 后的 self.global_model
+        omega_ref -> self.original_model = deepcopy(omega_t)
+        N_f       -> self.aggregated_noises / self.proxy_noise_loader
     """
 
     def __init__(self, args):
         super().__init__(args)
+
+        # Algorithm 1 explicitly takes the initialized model omega_0 as input.
+        # Keep it before load_model() replaces/loads the trained omega_t.
+        self.initial_model = copy.deepcopy(self.global_model).to(self.device)
+        self.initial_model.eval()
+        for p in self.initial_model.parameters():
+            p.requires_grad_(False)
 
         self.set_slow_clients()
         self.set_clients(clientJellyfish)
@@ -35,45 +66,40 @@ class Jellyfish(Server):
         self.Budget = []
         self.unlearn_Budget = []
 
-        # Jellyfish 特有资产
-        self.original_model = None  # 遗忘前的模型副本 (\omega^t)
-        self.proxy_noise_loader = None  # 聚合后的代理噪声 DataLoader (N_f)
-        self.aggregated_noises = None  # 聚合后的代理噪声 tensor
-        self.aggregated_labels = None  # 对应标签
+        self.original_model = None
+        self.proxy_noise_loader = None
+        self.aggregated_noises = None
+        self.aggregated_labels = None
 
-        # 4.3 节超参数
-        self.alpha_dis = getattr(args, 'alpha', 0.9)  # 通道保留比例 alpha，论文默认 0.9
-        self.dis_epochs = getattr(args, 'dis_epochs', 5)  # 解耦迭代 epoch 数 E_dis，论文默认 5
+        # Paper-explicit hyperparameters: alpha=0.9, mu_c=mu_d=0.5.
+        # Other defaults below are implementation choices because the paper does
+        # not publish all of E_dis/E_un/Temp/pi/N_T/delta numerically.
+        self.alpha_dis = getattr(args, "alpha", 0.9)
+        self.dis_epochs = getattr(args, "dis_epochs", 5)
+        self.dis_lr = getattr(args, "dis_lr", 1e-3)
 
-        # 4.4 节超参数动态挂载 (严格对齐论文第 16、17、23 页实验参数设置)
-        self.unlearn_epochs = getattr(args, 'unlearn_epochs', 3)  # 遗忘迭代周期 E_un
-        self.unlearn_lr = getattr(args, 'unlearn_lr', 0.01)  # 遗忘学习率 \mu_un
-        self.mu_c = getattr(args, 'mu_c', 0.5)  # 混淆损失超参数 \mu_c
-        self.mu_d = getattr(args, 'mu_d', 0.5)  # 蒸馏损失超参数 \mu_d
-        self.distill_temp = getattr(args, 'distill_temp', 4.0)  # 蒸馏温度 Temp
-        self.pi_mask = getattr(args, 'pi_mask', 1e-3)  # 梯度掩蔽阈值 \pi
-        self.num_bad_teachers = getattr(args, 'num_teachers', 3)  # 劣质教师数量 N_T
+        self.unlearn_epochs = getattr(args, "unlearn_epochs", 3)
+        self.unlearn_lr = getattr(args, "unlearn_lr", getattr(args, "unlearn_rate", 5e-3))
+        self.mu_c = getattr(args, "mu_c", 0.5)
+        self.mu_d = getattr(args, "mu_d", 0.5)
+        self.distill_temp = getattr(args, "distill_temp", 4.0)
+        self.pi_mask = getattr(args, "pi_mask", 1e-3)
+        self.num_bad_teachers = getattr(args, "num_teachers", 3)
+        self.mask_microbatch = max(1, getattr(args, "mask_microbatch", 1))
+        # Optional numerical safeguard. 0/None means disabled, matching Algorithm 1.
+        self.max_update_norm = getattr(args, "max_update_norm", 0.0)
 
-        # 4.5 节修复超参数动态挂载 (对齐论文第 20 页与 23 页实验参数设置)
-        self.delta_threshold = getattr(args, 'delta_threshold', 0.05)  # 精度下降触发门限 \delta (默认 5%)
-        self.repair_epochs = getattr(args, 'repair_epochs', 2)  # 修复微调 epoch 数 (默认 2)
-        self.repair_lr = getattr(args, 'repair_lr', 0.005)  # 修复学习率
+        self.delta_threshold = getattr(args, "delta_threshold", 0.05)
+        self.repair_epochs = getattr(args, "repair_epochs", 2)
+        self.repair_lr = getattr(args, "repair_lr", 5e-3)
+        self.repair_noise_steps = getattr(args, "repair_noise_steps", 100)
+        self.repair_noise_lr = getattr(args, "repair_noise_lr", getattr(args, "noise_lr", 0.1))
+        self.disable_repair = getattr(args, "disable_repair", False)
 
-        # 预训练参数持久化路径（对齐基类 save_global_model 的路径格式）
-        # 当 attack='False' 且 learning_state!='retrain' 时，路径为 models_seed{X}_resnet/{dataset}/_server.pt
-        self.pretrain_model_path = os.path.join(
-            "models_seed" + str(self.args.seed_num) + "_resnet",
-            self.dataset,
-            "_server.pt"
-        )
-
+    # ------------------------------------------------------------------
+    # Standard FL training
+    # ------------------------------------------------------------------
     def train(self):
-        """标准联邦预训练阶段 (Learning Phase)"""
-        # if os.path.exists(self.pretrain_model_path):
-        #     print(f"\n[Learning Skip] 检测到已存在历史 Learning 阶段结果: {self.pretrain_model_path}")
-        #     print(">>> 正在直接跳过常规预训练，进入阶段①代理数据集生产流...")
-        #     return
-
         print("\n" + "=" * 50)
         print("Starting Learning Phase (Standard FedAvg Pre-training)...")
         print("=" * 50)
@@ -85,583 +111,756 @@ class Jellyfish(Server):
 
             if i % self.eval_gap == 0:
                 print(f"\n-------------Round number: {i}-------------")
-                print("\nEvaluate global model")
                 self.evaluate()
 
             for client in self.selected_clients:
                 client.train()
 
             self.receive_models()
-
             if self.dlg_eval and i % self.dlg_gap == 0:
                 self.call_dlg(i)
-
             self.aggregate_parameters()
 
             self.Budget.append(time.time() - s_t)
-            print('-' * 25, 'time cost', '-' * 25, self.Budget[-1])
+            print("-" * 25, "time cost", "-" * 25, self.Budget[-1])
 
             if self.auto_break and self.check_done(acc_lss=[self.rs_test_acc], top_cnt=self.top_cnt):
                 break
 
-        print("\nBest accuracy during Learning Phase:")
-        print(max(self.rs_test_acc))
+        if self.rs_test_acc:
+            print("\nBest accuracy during Learning Phase:", max(self.rs_test_acc))
 
-        # ======= 修复代码：在此处训练攻击者模型，规避 NotFittedError =======
-        print("\n[MIA] Training Attacker model for baseline evaluation...")
-        self.attacker = train_attack_model(self.global_model, self.clients, self.num_classes, self.device)
-
-        # 打印未遗忘前的攻击基准
-        (PRE_old, REC_old) = attack(self.global_model, self.attacker, self.unlearning_clients, self.num_classes,
-                                    self.device)
-        print("MIA Attacker to old model precision = {:.4f}".format(PRE_old))
-        print("MIA Attacker to old model recall = {:.4f}".format(REC_old))
-        # ===============================================================
+        # Keep your existing MIA pipeline, but evaluate the same target-client
+        # group before and after unlearning.
+        print("\n[MIA] Training attacker model for baseline evaluation...")
+        self.attacker = train_attack_model(
+            self.global_model, self.clients, self.num_classes, self.device
+        )
+        if self.unlearning_clients:
+            pre, rec = attack(
+                self.global_model,
+                self.attacker,
+                self.unlearning_clients,
+                self.num_classes,
+                self.device,
+            )
+            print(f"MIA target-client precision before unlearning = {pre:.4f}")
+            print(f"MIA target-client recall before unlearning    = {rec:.4f}")
 
         self.save_results()
-        # 此时调用基类方法，将可以安全、完美地持久化 global_model 和已训练的 attacker
         self.save_global_model()
-        print(f"[Learning Complete] 原始收敛权重与攻击者快照已成功固化至本地文件。")
+        print("[Learning Complete] Global model/attacker snapshot saved.")
 
-    # def unlearning(self):
-    #     """
-    #     Jellyfish 遗忘流程控制中心 (对齐 BatchNorm 与 warm_up 完美版)
-    #     """
-    #     print("\n" + "=" * 50)
-    #     print("Initializing Jellyfish Unlearning Phase Flow...")
-    #     print("=" * 50)
-    #
-    #     # 1. 调用基类内置方法全量重载大模型快照与攻击者模型
-    #     self.load_model()
-    #
-    #     # 2. 关键修复：先将最新的全局模型参数同步分发给所有的本地客户端
-    #     print("[Sync] 正在将重载的全局权重下发至各客户端实体...")
-    #     self.send_models()
-    #
-    #     # 3. 关键修复：执行 warm_up，利用本地数据流冲刷并纠正各端 BN 层的 running_mean/var
-    #     print("[BN Warm-up] 正在触发端侧热身，对齐 BatchNorm 滚动统计量...")
-    #     self.warm_up()
-    #
-    #     # 4. 关键保护：此时参数已完美对齐，锁死为评估模式准备纯推理测试
-    #     self.global_model.eval()
-    #     for client in self.clients:
-    #         client.model.eval()
-    #
-    #     # 5. 备份原始大模型快照 \omega^t
-    #     self.original_model = copy.deepcopy(self.global_model)
-    #     self.original_model.eval()
-    #
-    #     # 6. 当场测量 Utility 性能
-    #     print("\n[验证] 正在校验初始载入权重的 Utility 性能...")
-    #     self.evaluate()
-    #
-    #     # 7. 严格复刻参考算法的 MIA 攻击基准评估逻辑
-    #     from utils.attack_utils import attack
-    #
-    #     print("\n[MIA Evaluation] 正在使用重载的 Attacker 评估未遗忘前的隐私抗性...")
-    #     (PRE_unlearning, REC_unlearning) = attack(
-    #         self.global_model,
-    #         self.attacker,
-    #         self.clients,
-    #         self.num_classes,
-    #         self.device
-    #     )
-    #
-    #     print("MIA Attacker to unlearning model precision = {:.4f}".format(PRE_unlearning))
-    #     print("MIA Attacker to unlearning model recall = {:.4f}".format(REC_unlearning))
-    #
-    #     # 8. 持久化遗忘阶段的指标结果
-    #     self.save_unlearning(PRE_unlearning)
-    #
-    #     print("\n" + "=" * 50)
-    #     print("[Jellyfish Unlearning Done] 已成功通过基类管道对齐历史指标。")
-    #     print("=" * 50)
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _freeze_bn_stats(model):
+        """
+        冻结 BatchNorm 的 running statistics，但不冻结普通可训练参数。
 
+        原因：Stage 2/3 使用的是人工生成 proxy noise。如果直接 model.train()，
+        BN 的 running_mean / running_var 会被代理噪声分布改写，产生额外的
+        非论文目标更新。因此将 BN 层单独切到 eval()，同时卷积/全连接参数
+        仍然可以正常反向传播。
+        """
+        for m in model.modules():
+            if isinstance(m, (nn.BatchNorm1d, nn.BatchNorm2d, nn.BatchNorm3d)):
+                m.eval()
+
+    @staticmethod
+    def _flatten_proxy(noises, labels):
+        if torch.is_tensor(noises):
+            noises = [noises]
+        if torch.is_tensor(labels):
+            labels = [labels]
+        noises = list(noises)
+        labels = list(labels)
+        if len(noises) == 0:
+            raise RuntimeError("Empty proxy-noise list.")
+        return torch.cat(noises, dim=0), torch.cat(labels, dim=0)
+
+    @staticmethod
+    def _reset_classifier_head(teacher):
+        """Reinitialize only the classifier head of an omega_0-based teacher."""
+        head = getattr(teacher, "head", None)
+        if head is None:
+            return teacher
+        for module in head.modules():
+            if hasattr(module, "reset_parameters"):
+                try:
+                    module.reset_parameters()
+                except TypeError:
+                    pass
+        return teacher
+
+    def _build_bad_teachers(self):
+        """
+        Build the incompetent-teacher set used by Eqs. (13)-(16).
+
+        Algorithm 1 passes omega_0 into the unlearning loss, while the text only
+        specifies that M_bad must not have been exposed to D_f and that multiple
+        teachers may be used.  We therefore anchor every teacher at omega_0 rather
+        than at the trained/disentangled omega_t.  For N_T > 1, classifier heads are
+        independently reset to provide the diversity requested by Eq. (16).
+        """
+        n_teachers = max(int(self.num_bad_teachers), 1)
+        teachers = []
+        for idx in range(n_teachers):
+            teacher = copy.deepcopy(self.initial_model).to(self.device)
+            if idx > 0:
+                teacher = self._reset_classifier_head(teacher)
+            teacher.eval()
+            for p in teacher.parameters():
+                p.requires_grad_(False)
+            teachers.append(teacher)
+        return teachers
+
+    def _global_gradient_harmonization(self, g_f, g_r):
+        """
+        论文 Eq.(20) 的全参数空间 Gradient Harmonization。
+
+        先把所有层参数视为一个整体向量，计算：
+            dot = g_f · g_r
+
+        若 dot < 0，说明遗忘梯度与保留/漂移梯度方向冲突，则执行：
+            g_f' = g_f - (g_r·g_f / ||g_r||^2) g_r
+            G    = g_f' + g_r
+
+        若不存在冲突，则直接 G = g_f + g_r。
+
+        注意：这里不能逐层分别判断冲突，否则与论文中的全参数向量投影不一致。
+        """
+        dot = torch.zeros((), device=self.device)
+        norm_r_sq = torch.zeros((), device=self.device)
+
+        for name in g_f:
+            dot += torch.sum(g_f[name] * g_r[name])
+            norm_r_sq += torch.sum(g_r[name] * g_r[name])
+
+        if dot.item() < 0.0 and norm_r_sq.item() > 1e-20:
+            coeff = dot / norm_r_sq
+            return {
+                name: (g_f[name] - coeff * g_r[name]) + g_r[name]
+                for name in g_f
+            }, float(dot.item())
+
+        return {name: g_f[name] + g_r[name] for name in g_f}, float(dot.item())
+
+    def _clip_gradient_dict(self, grads, max_norm):
+        if max_norm is None or max_norm <= 0:
+            return grads
+        norm_sq = torch.zeros((), device=self.device)
+        for g in grads.values():
+            norm_sq += torch.sum(g * g)
+        total_norm = torch.sqrt(norm_sq + 1e-20)
+        if total_norm.item() <= max_norm:
+            return grads
+        scale = max_norm / total_norm
+        return {name: g * scale for name, g in grads.items()}
+
+    def _client_accuracy(self, client, model):
+        client.set_parameters(model)
+        metrics = client.test_metrics()
+        correct, n = metrics[0], metrics[1]
+        return float(correct) / float(n) if n > 0 else 0.0
+
+    # ------------------------------------------------------------------
+    # Complete client-level unlearning flow
+    # ------------------------------------------------------------------
     def unlearning(self):
         """
-        Jellyfish 遗忘主流程控制中心
-        """
-        # print("\n" + "=" * 50)
-        # print("Initializing Jellyfish Unlearning Phase Flow...")
-        # print("=" * 50)
+        Jellyfish 遗忘主流程控制中心。
 
-        # 1. 调用基类内置方法全量重载大模型快照与攻击者模型
+        重要：下面从 load_model() 到 evaluate() 的 6 个步骤是当前 FUlib
+        工程既有的模型恢复 / 同步 / BN warm-up 流程，按项目约束完整保留。
+
+        因此，在本实现中把 warm_up() 之后的 global_model 定义为论文后续
+        Jellyfish 阶段使用的遗忘前模型 omega_t，并将其深拷贝到
+        self.original_model，后续有三个用途：
+            1) Stage 1 代理遗忘集 N_f 的生成参考模型；
+            2) Stage 3 Gradient Mask 的敏感度参考模型；
+            3) Stage 3 Drift Loss 的参数参考 omega_ref。
+
+        也就是说，在本项目中：
+            omega_t := warm_up() 完成后的 global_model
+            omega_ref := copy.deepcopy(omega_t)
+        """
+        if not self.unlearning_clients:
+            raise RuntimeError(
+                "Jellyfish client-level unlearning needs --unlearning_clients / -uc."
+            )
+
+        print("\n" + "=" * 62)
+        print("Jellyfish whole-client unlearning")
+        print("Target client ids:", [c.id for c in self.unlearning_clients])
+        print("=" * 62)
+
+        # ================================================================
+        # [项目固定步骤 1] 从磁盘恢复 Learning 阶段保存的模型 / 攻击者等状态。
+        # 这一步由 Server 基类实现，必须保留。
+        # ================================================================
         self.load_model()
 
-        # 2. 关键修复：先将最新的全局模型参数同步分发给所有的本地客户端
-        # print("[Sync] 正在将重载的全局权重下发至各客户端实体...")
+        # ================================================================
+        # [项目固定步骤 2] 将刚恢复的最新全局模型同步给全部本地客户端。
+        # 这保证 client.model 与 server.global_model 在 warm_up 前一致。
+        # ================================================================
         self.send_models()
 
-        # 3. 关键修复：执行 warm_up，利用本地数据流冲刷并纠正各端 BN 层的 running_mean/var
-        # print("[BN Warm-up] 对齐 BatchNorm 统计量...")
+        # ================================================================
+        # [项目固定步骤 3] FUlib 既有 BN warm-up。
+        # 根据当前项目约束，这一步不能删除。
+        # 其执行完成后的 global_model 被视为本实现中的 omega_t。
+        # ================================================================
         self.warm_up()
 
-        # 4. 关键保护：此时参数已完美对齐，锁死为评估模式准备纯推理测试
+        # ================================================================
+        # [项目固定步骤 4] 切换到 eval 模式，锁定推理态。
+        # 注意：后续 Stage 2/3 内部需要训练时，会局部切回 train()，并再次
+        # 单独冻结 BN running statistics，避免 proxy noise 改写 BN buffer。
+        # ================================================================
         self.global_model.eval()
         for client in self.clients:
             client.model.eval()
 
-        # 5. 备份原始大模型快照 \omega^t
+        # ================================================================
+        # [项目固定步骤 5] 保存遗忘开始前参考模型。
+        # 此处 original_model 即 Jellyfish 后续使用的 omega_t / omega_ref。
+        # 它必须在 Stage 1、Stage 2、Stage 3 任何遗忘更新发生之前保存。
+        # ================================================================
         self.original_model = copy.deepcopy(self.global_model)
         self.original_model.eval()
 
-        # 6. 当场测量 Utility 性能
-        # print("\n[验证] 正在校验初始载入权重的 Utility 性能...")
+        # ================================================================
+        # [项目固定步骤 6] 记录遗忘前 Utility。
+        # ================================================================
         self.evaluate()
 
-
-        # # ====== 阶段①: 代理数据生成与服务器重洗整合 ======
-        # print("\nPhase ①: Triggering Local Proxy Noise Generation & Server Assembly...")
+        # ================================================================
+        # Stage 1: 代理遗忘数据集 N_f
+        # 目标客户端只在本地读取自己的完整 D_f 的标签分布；每个类别单独
+        # 生成 class-conditioned error-minimization noise，服务器只负责收集、
+        # 拼接和打乱，不读取目标客户端原始图像。
+        # ================================================================
+        print("\n[Phase 1] Proxy-noise generation and aggregation")
         self.collect_proxy_noise()
-        #
-        # # ====== 阶段②: 知识解耦 (论文 4.3 节核心) ======
-        # print("\nPhase ②: Entering Server-Side Knowledge Disentanglement...")
-        self.fit_knowledge_disentanglement()
-        # 监控点 1：测量知识解耦后的精度演进
-        self.send_models()  # 必须先将解耦后的 base 层权重同步给客户端
-        self.global_model.eval()
-        for c in self.clients: c.model.eval()
-        # print("\n>>> [测量 1] 阶段②知识解耦执行完成后测量结果:")
-        self.evaluate()
-        #
-        # # ====== 阶段③: 多目标联合遗忘 (论文 4.4 节核心) ======
-        # print("\nPhase ③: Entering Multi-Objective Joint Unlearning Trajectory...")
+
+        # ================================================================
+        # Stage 2: Knowledge Disentanglement
+        # 根据最后卷积层通道 L1 激活强度，选择低重要性通道并最小化其激活。
+        # ================================================================
+        if self.dis_epochs > 0:
+            print("\n[Phase 2] Knowledge disentanglement")
+            self.fit_knowledge_disentanglement()
+
+        # ================================================================
+        # Stage 3: Joint Unlearning
+        # 包含 Hard / Confusion / Distillation 三项遗忘目标，以及 Drift、
+        # Gradient Mask 和 Gradient Harmonization。
+        # ================================================================
+        print("\n[Phase 3] Joint unlearning")
         self.fit_joint_unlearning()
-        # 监控点 2：测量执行完多目标冲突梯度消除后的精度演进
-        self.send_models()  # 必须把阶段③手术修正后的参数灌入客户端
-        self.send_models_target() 
-        self.global_model.eval()
-        for c in self.clients: c.model.eval()
-        # print("\n>>> [测量 2] 阶段③多目标联合遗忘执行完成后测量结果:")
-        self.evaluate()
-        #
-        # # ====== 阶段④: 零样本模型修复 (严格对齐论文 4.5 节) ======
-        # print("\nPhase ④: Entering Zero-Shot Adaptive Model Repair Stage...")
-        self.adaptive_model_repair()
 
-        # print("\n[Final Sync] 整个 Jellyfish 框架全量演进结束，正在同步最终模型...")
+        # ================================================================
+        # Stage 4: Zero-shot Repair（可选）
+        # whole-client 场景下，目标遗忘客户端已经没有 retained data，
+        # 因此 repair 只允许由非目标客户端生成 N_r。
+        # ================================================================
+        if not self.disable_repair:
+            print("\n[Phase 4] Optional zero-shot repair")
+            self.adaptive_model_repair()
+        else:
+            print("\n[Phase 4] Repair disabled")
+
+        # ================================================================
+        # 将最终遗忘模型重新同步给客户端，并执行最终评估。
+        # ================================================================
         self.send_models()
-        self.send_models_target()
+        if hasattr(self, "send_models_target"):
+            self.send_models_target()
 
         self.global_model.eval()
-        for c in self.clients: c.model.eval()
+        for client in self.clients:
+            client.model.eval()
 
-        print("\n>>> [测量 3 - 最终结果] 零样本自适应修复微调后最终测量结果:")
+        print("\n[Final] Global evaluation")
         self.evaluate()
 
-        # 评估最终的成员推理攻击 MIA
-        print("\n[MIA Evaluation] 正在评估最终模型的隐私抗性...")
-        (PRE_unlearning, REC_unlearning) = attack(
-            self.global_model,
-            self.attacker,
-            self.clients,
-            self.num_classes,
-            self.device
-        )
+        # ================================================================
+        # MIA：如果 Learning 阶段已训练 attacker，则对同一个目标客户端集合
+        # 做遗忘后评估，保证前后对比对象一致。
+        # ================================================================
+        if hasattr(self, "attacker") and self.attacker is not None:
+            print("\n[MIA] Target-client group after unlearning")
+            pre, rec = attack(
+                self.global_model,
+                self.attacker,
+                self.unlearning_clients,
+                self.num_classes,
+                self.device,
+            )
+            print(f"MIA target-client precision after unlearning = {pre:.4f}")
+            print(f"MIA target-client recall after unlearning    = {rec:.4f}")
+            self.save_unlearning(pre)
 
-        print("MIA Attacker to unlearning model precision = {:.4f}".format(PRE_unlearning))
-        print("MIA Attacker to unlearning model recall = {:.4f}".format(REC_unlearning))
-        self.save_unlearning(PRE_unlearning)
-        # print("\n" + "=" * 50)
-        # print("[Jellyfish Final Flow Done] 逐步性能链条分析完毕。")
-        # print("=" * 50)
-
-
-
+    # ------------------------------------------------------------------
+    # Stage 1：代理遗忘数据 N_f 的服务器聚合
+    # ------------------------------------------------------------------
     def collect_proxy_noise(self):
         """
-        阶段①核心：收集各遗忘客户端的代理噪声并在服务器端组装
+        收集目标客户端上传的 class-conditioned proxy，并组装服务器侧 N_f。
+
+        职责边界：
+            Client：统计完整 D_f 的类别分布，逐类别生成 proxy noise。
+            Server：只检查数量、聚合、shuffle、构造 DataLoader、持久化。
+
+        whole-client baseline 中若只有一个目标客户端，则：
+            N_f = N_f^(target client)
+
+        若以后扩展到多个目标客户端，则服务器会将各客户端 proxy 做 union。
         """
-        self.send_models_target()
+        if not self.unlearning_clients:
+            raise RuntimeError("No target client was specified for unlearning.")
+        if self.original_model is None:
+            raise RuntimeError("omega_ref/omega_t must be snapshotted before Stage 1.")
 
         client_noises_list = []
         client_labels_list = []
+        expected_total = 0
 
         for client in self.unlearning_clients:
-            # print(f"[Server] Requesting proxy noise from Target Client {client.id}...")
-            noises, labels = client.generate_noise(
-                global_model=self.global_model,
-                steps=self.args.noise_steps,
-                lr=self.args.noise_lr
+            class_counts = client.get_class_distribution()
+            expected = int(sum(class_counts.values()))
+            expected_total += expected
+            print(
+                f"  client {client.id} D_f distribution = "
+                f"{dict(sorted(class_counts.items()))}"
             )
+
+            # Generate from the exact pre-unlearning omega_t/reference snapshot.
+            noises, labels = client.generate_noise(
+                global_model=self.original_model,
+                steps=getattr(self.args, "noise_steps", 200),
+                lr=getattr(self.args, "noise_lr", 0.1),
+            )
+
+            n_proxy = sum(int(x.shape[0]) for x in noises)
+            n_label = sum(int(y.shape[0]) for y in labels)
+            if n_proxy != n_label:
+                raise RuntimeError(
+                    f"Client {client.id}: proxy/label mismatch {n_proxy} vs {n_label}."
+                )
+            if n_proxy != expected:
+                raise RuntimeError(
+                    f"Client {client.id}: expected {expected} proxies from |D_f| "
+                    f"but received {n_proxy}."
+                )
+
             client_noises_list.append(noises)
             client_labels_list.append(labels)
+            print(f"  received {n_proxy} proxy samples from client {client.id}")
 
-            total_client_samples = sum([n.shape[0] for n in noises])
-            # print(f"[Server] 接收成功：Client {client.id} 已成功上传 {total_client_samples} 个脱敏代理样本")
-
-        # 合并构建统一噪声矩阵集合 N_f (对应论文公式 4)
         self.aggregated_noises, self.aggregated_labels = aggregate_client_noises(
             client_noises_list, client_labels_list
         )
 
-        # 组装全局洗牌后的训练 Dataloader
+        if int(self.aggregated_labels.numel()) != expected_total:
+            raise RuntimeError(
+                f"Aggregated N_f size mismatch: expected {expected_total}, "
+                f"got {self.aggregated_labels.numel()}."
+            )
+
         self.proxy_noise_loader = create_noise_dataloader(
             self.aggregated_noises,
             self.aggregated_labels,
             batch_size=self.batch_size,
-            shuffle=True
+            shuffle=True,
         )
 
-        # print(f"[Server] Global Proxy Dataset N_f 串联组装完毕 (总样本数: {self.aggregated_noises.shape[0]}).")
+        unique, counts = torch.unique(self.aggregated_labels, return_counts=True)
+        distribution = {int(k): int(v) for k, v in zip(unique.tolist(), counts.tolist())}
+        print(f"  global N_f size = {len(self.aggregated_labels)}")
+        print(f"  global N_f distribution = {dict(sorted(distribution.items()))}")
 
-        # 固化备份
-        save_path = f"proxy_noise_{self.dataset}_clients_{'_'.join(map(str, [c.id for c in self.unlearning_clients]))}.pt"
-        save_proxy_noise(self.aggregated_noises, self.aggregated_labels, save_path)
+        client_ids = "_".join(str(c.id) for c in self.unlearning_clients)
+        save_proxy_noise(
+            self.aggregated_noises,
+            self.aggregated_labels,
+            f"proxy_noise_{self.dataset}_clients_{client_ids}.pt",
+        )
 
+    # ------------------------------------------------------------------
+    # Stage 2：Knowledge Disentanglement
+    # ------------------------------------------------------------------
     def fit_knowledge_disentanglement(self):
         """
-        阶段②算法落地：通过在前向传播中截获特征图并压制弱激活通道实现跨类解耦。
+        Stage 2：知识解耦。
+
+        1) 冻结 classifier head，只更新 backbone/base；
+        2) hook backbone 中最后一个 Conv2d 的输出 F_conv；
+        3) 对每个通道计算空间维度 L1 norm，再在 batch 维求平均；
+        4) 选出 bottom-(1-alpha) 的低重要性通道；
+        5) 最小化这些通道的平均 L1 激活，使遗忘相关纠缠知识逐渐被压制。
+
+        这里使用 proxy N_f，不访问目标客户端真实图像。
         """
+        if not hasattr(self.global_model, "base") or not hasattr(self.global_model, "head"):
+            raise RuntimeError("Jellyfish expects a BaseHeadSplit model with .base and .head.")
+
         self.global_model.head.requires_grad_(False)
         self.global_model.base.requires_grad_(True)
 
         target_conv_layer = None
-        for name, module in self.global_model.base.named_modules():
+        for _, module in self.global_model.base.named_modules():
             if isinstance(module, nn.Conv2d):
                 target_conv_layer = module
-
         if target_conv_layer is None:
-            raise RuntimeError("[Disentangle Error] 骨干网络中未检测到合规的 Conv2d 激活层。")
+            raise RuntimeError("Knowledge disentanglement requires a convolutional backbone.")
 
-        F_conv_container = []
+        feature_box = []
 
-        def forward_hook_fn(module, input, output):
-            F_conv_container.append(output)
+        def hook_fn(_module, _inputs, output):
+            feature_box.append(output)
 
-        hook_handle = target_conv_layer.register_forward_hook(forward_hook_fn)
+        hook = target_conv_layer.register_forward_hook(hook_fn)
+        optimizer = torch.optim.SGD(self.global_model.base.parameters(), lr=self.dis_lr)
 
-        dis_lr = getattr(self.args, 'local_learning_rate', 0.01)
-        # optimizer_dis = torch.optim.Adam(self.global_model.base.parameters(), lr=dis_lr)
-        optimizer_dis = torch.optim.SGD(
-            self.global_model.base.parameters(),
-            lr=1e-4,
-            momentum=0.9,
-            weight_decay=1e-4
+        try:
+            self.global_model.train()
+            self._freeze_bn_stats(self.global_model)
+
+            for epoch in range(self.dis_epochs):
+                total_loss = 0.0
+                num_batches = 0
+
+                for x, _ in self.proxy_noise_loader:
+                    x = x.to(self.device)
+                    feature_box.clear()
+
+                    optimizer.zero_grad(set_to_none=True)
+                    _ = self.global_model(x)
+                    if not feature_box:
+                        raise RuntimeError("Last-conv forward hook did not fire.")
+
+                    f_conv = feature_box[-1]
+                    # Paper: L1 norm of each HxW feature map, then aggregate batch.
+                    channel_norms = f_conv.abs().sum(dim=(2, 3)).mean(dim=0)
+                    c = channel_norms.numel()
+                    k = max(1, int(round((1.0 - self.alpha_dis) * c)))
+                    k = min(k, c)
+                    bottom_idx = torch.topk(channel_norms, k=k, largest=False).indices
+                    loss_dis = channel_norms[bottom_idx].mean()
+
+                    loss_dis.backward()
+                    optimizer.step()
+
+                    total_loss += float(loss_dis.item())
+                    num_batches += 1
+
+                print(
+                    f"  disentangle epoch {epoch + 1}/{self.dis_epochs}: "
+                    f"loss={total_loss / max(num_batches, 1):.6f}"
+                )
+        finally:
+            hook.remove()
+            self.global_model.head.requires_grad_(True)
+            self.global_model.eval()
+
+    # ------------------------------------------------------------------
+    # Stage 3-A：Gradient Mask，论文 Eq.(21)-(22)
+    # ------------------------------------------------------------------
+    def build_gradient_mask(self):
+        """
+        根据论文 Eq.(21)-(22) 构造参数级二值 mask。
+
+        对遗忘参考模型 omega_t (= original_model) 和 proxy N_f 计算普通 CE：
+            l_f = CE(M_omega_t(x_f), y_f)
+
+        参数敏感度近似为：
+            s = mean_i | grad_omega l_i |
+
+        再按阈值 pi 得到：
+            m_s = 1(s < pi)
+
+        后续只对 drift/retention gradient 使用：
+            g_r' = g_r * m_s
+
+        默认 mask_microbatch=1 时最接近逐样本绝对梯度。
+        """
+        model = self.original_model
+        model.eval()
+
+        # original_model 平时只作为参考快照使用；构造 mask 时需要对其参数求梯度。
+        for p in model.parameters():
+            p.requires_grad_(True)
+
+        saliency = {
+            name: torch.zeros_like(p, device=self.device)
+            for name, p in model.named_parameters()
+        }
+        total_samples = 0
+
+        for x, y in self.proxy_noise_loader:
+            x = x.to(self.device)
+            y = y.to(self.device)
+
+            for start in range(0, y.size(0), self.mask_microbatch):
+                end = min(start + self.mask_microbatch, y.size(0))
+                xm, ym = x[start:end], y[start:end]
+                bs = ym.size(0)
+
+                model.zero_grad(set_to_none=True)
+                out = model(xm)
+                loss = F.cross_entropy(out, ym, reduction="mean")
+                loss.backward()
+
+                with torch.no_grad():
+                    for name, p in model.named_parameters():
+                        if p.grad is not None:
+                            # abs before accumulation avoids cross-batch sign cancellation.
+                            saliency[name] += p.grad.detach().abs() * bs
+                total_samples += bs
+
+        if total_samples == 0:
+            raise RuntimeError("Cannot build gradient mask from an empty N_f.")
+
+        mask = {}
+        total_n, total_keep = 0, 0.0
+        with torch.no_grad():
+            for name, s in saliency.items():
+                mean_abs_grad = s / float(total_samples)
+                m = (mean_abs_grad < self.pi_mask).float()
+                mask[name] = m
+                total_n += m.numel()
+                total_keep += float(m.sum().item())
+
+        keep_ratio = total_keep / max(total_n, 1)
+        print(
+            f"  gradient-mask keep ratio={keep_ratio:.6f}, "
+            f"masked ratio={1.0 - keep_ratio:.6f}, pi={self.pi_mask:g}"
         )
+        if keep_ratio > 0.999:
+            print("  [WARN] Mask is almost all ones; pi may be too large.")
+        if keep_ratio < 0.001:
+            print("  [WARN] Mask is almost all zeros; pi may be too small.")
+        return mask
 
-        self.global_model.train()
-        for epoch in range(self.dis_epochs):
-            loss_all = 0.0
-            for batch_idx, (x, y) in enumerate(self.proxy_noise_loader):
-                x, y = x.to(self.device), y.to(self.device)
-                F_conv_container.clear()
-
-                _ = self.global_model(x)
-
-                if len(F_conv_container) == 0:
-                    raise ValueError("[Disentangle Error] 特征图截获探针未被成功触发！")
-
-                F_conv = F_conv_container[0]
-                num_channels = F_conv.shape[1]
-
-                # 公式 (7)：计算各个通道的 L1 范数
-                channel_norms = torch.mean(torch.abs(F_conv), dim=[0, 2, 3])
-
-                # 公式 (5)：计算分割线 Thr
-                k_idx = max(1, int((1.0 - self.alpha_dis) * num_channels))
-                Thr = torch.kthvalue(channel_norms, k_idx).values
-
-                # 公式 (7) 分流：保留小于 Thr 的部分进行惩罚，其余（主力通道）置 0 保护
-                norms_filtered = torch.where(channel_norms < Thr, channel_norms, torch.zeros_like(channel_norms))
-
-                # 公式 (6)：解耦损失计算
-                denominator = (1.0 - self.alpha_dis) * num_channels + 1e-8
-                loss_disentangle = torch.sum(norms_filtered) / denominator
-
-                optimizer_dis.zero_grad()
-                loss_disentangle.backward()
-                torch.nn.utils.clip_grad_norm_(self.global_model.base.parameters(), max_norm=10.0)  # 🌟 物理防爆
-                optimizer_dis.step()
-
-
-                loss_all += loss_disentangle.item()
-
-            mean_epoch_loss = loss_all / len(self.proxy_noise_loader)
-            # print(f"    Epoch [{epoch + 1}/{self.dis_epochs}] - Disentangle Mean Loss: {mean_epoch_loss:.6f}")
-
-        hook_handle.remove()
-        # print("  [Disentangle Engine] 知识解耦阶段完成。跨类别纠缠特征已被物理压制清零。")
-
+    # ------------------------------------------------------------------
+    # Stage 3-B：Joint Unlearning
+    # ------------------------------------------------------------------
     def fit_joint_unlearning(self):
         """
-        阶段③全量落地：严格按照论文 4.4 节公式组装核心遗忘训练引擎（集成多目标损失、梯度掩蔽与梯度协调）
+        Stage 3：论文联合遗忘核心。
+
+        Forgetting branch：
+            L_un = L_hard + mu_c*L_confusion + mu_d*L_distillation
+            -> 得到 g_f
+
+        Retention / drift branch：
+            L_drift = 1/2 ||omega - omega_ref||_2^2
+            g_r = omega - omega_ref
+            g_r' = g_r * m_s
+
+        最后在完整参数空间判断 g_f 与 g_r' 是否冲突，执行 Eq.(20) 投影，
+        得到 G，并按论文 Algorithm 1 直接更新：
+            omega <- omega - mu_un * G
+
+        为避免引入论文之外的额外更新，这里不通过带 momentum/weight_decay
+        的 optimizer.step() 更新最终参数。
         """
-        # 全量激活所有参数，进行端到端全量微调更新
-        for param in self.global_model.parameters():
-            param.requires_grad = True
+        for p in self.global_model.parameters():
+            p.requires_grad_(True)
 
-        # 1. 产生不合格教师网络集合 T_set (严格遵循公式 16 机制，通过随机化产生 N_T 个全盲教师)
-        bad_teachers = []
-        for t_idx in range(self.num_bad_teachers):
-            teacher = copy.deepcopy(self.global_model)
-            # 通过对最后一层分类头引入重度扰动高斯随机化破坏，使其对遗忘类吐出杂乱、均匀的 Logits 得分 v_j
-            for param in teacher.head.parameters():
-                param.data.copy_(torch.randn_like(param.data) * 2.0)
-            teacher.eval()
-            bad_teachers.append(teacher)
+        bad_teachers = self._build_bad_teachers()
+        gradient_mask = self.build_gradient_mask()
+        ref_params = dict(self.original_model.named_parameters())
 
-        # 2. 离线精准抽取敏感参数梯度，生产二值化梯度掩码 m_s (严格对齐公式 21)
-        # print("  [Unlearn Engine] Pre-calculating binary gradient mask m_s...")
-        gradient_mask = {}
-        for name, param in self.global_model.named_parameters():
-            gradient_mask[name] = torch.zeros_like(param.data)
-
-        # 使用干净的原始大模型计算遗忘数据样本点上的基础交叉熵，求取偏导敏感度
-        self.original_model.zero_grad()
-        mask_counter = 0
-        for x_m, y_m in self.proxy_noise_loader:
-            x_m, y_m = x_m.to(self.device), y_m.to(self.device)
-            out_m = self.original_model(x_m)
-            loss_m = nn.CrossEntropyLoss()(out_m, y_m)
-            loss_m.backward()
-            mask_counter += len(y_m)
-
-        # 依据敏感度阈值 \pi 实施二值硬切分
-        with torch.no_grad():
-            for name, param in self.original_model.named_parameters():
-                if param.grad is not None:
-                    # 绝对值小于 \pi 设为 1 (安全区)；大于等于 \pi 设为 0 (高度纠缠的隐私敏感重灾区)
-                    avg_grad = param.grad / float(mask_counter)
-                    gradient_mask[name] = (torch.abs(avg_grad) < self.pi_mask).float().to(self.device)
-                else:
-                    gradient_mask[name] = torch.ones_like(param.data).to(self.device)
-
-        # 3. 实例化多目标遗忘的核心闭环执行引擎
-        # optimizer_unlearn = torch.optim.Adam(self.global_model.parameters(), lr=self.unlearn_lr)
-        optimizer_unlearn = torch.optim.SGD(
-            self.global_model.parameters(),
-            lr=1e-4,  # 物理限速
-            momentum=0.9,
-            weight_decay=0.0005  # 引入权重衰减，锁死参数漂移
-        )
         criterion_ce = nn.CrossEntropyLoss()
-        criterion_kl = nn.KLDivLoss(reduction='batchmean')
-
-        # print(f"  [Unlearn Engine] Running Joint Multi-Objective Unlearning for {self.unlearn_epochs} epochs...")
+        criterion_kl = nn.KLDivLoss(reduction="batchmean")
 
         self.global_model.train()
+        self._freeze_bn_stats(self.global_model)
+
         for epoch in range(self.unlearn_epochs):
-            loss_unlearn_all = 0.0
-            loss_drift_all = 0.0
+            total_unlearn = 0.0
+            total_drift = 0.0
+            conflicts = 0
+            n_batches = 0
 
-            for batch_idx, (x, y) in enumerate(self.proxy_noise_loader):
-                x, y = x.to(self.device), y.to(self.device)
+            for x, y in self.proxy_noise_loader:
+                x = x.to(self.device)
+                y = y.to(self.device)
 
-                # =========================================================
-                # 步骤 A: 分流计算遗忘任务梯度 g_f (对齐公式 8, 9, 12, 16)
-                # =========================================================
-                optimizer_unlearn.zero_grad()
+                # ----- forgetting gradient g_f -----
+                self.global_model.zero_grad(set_to_none=True)
                 outputs = self.global_model(x)
 
-                # ① Hard Loss (公式 9): 反向最大化正确类别的损失，击碎原判决边界
+                # Eq. (9): minimizing +log p_y == negative CE.
                 loss_hard = -criterion_ce(outputs, y)
 
-                # ② Confusion Loss (公式 10, 11, 12): 定向寻找相似伪标签 y_fake 并强力拉近
                 with torch.no_grad():
-                    prob_m = F.softmax(outputs, dim=1)
-                    # 强行将正确标签位置的概率置零，在除自身以外的剩余域中提取 argmax 最大概率目标作为 y_fake
-                    prob_m.scatter_(1, y.view(-1, 1), 0.0)
-                    y_fake = torch.argmax(prob_m, dim=1)
-
+                    prob = F.softmax(outputs, dim=1)
+                    prob.scatter_(1, y.view(-1, 1), -1.0)
+                    y_fake = torch.argmax(prob, dim=1)
                 loss_confusion = criterion_ce(outputs, y_fake)
 
-                # ③ Distillation Loss (公式 13, 14, 15, 16): 引入 N_T 个不合格教师模型的输出提供随机性
-                loss_distill = 0.0
-                p_student = F.log_softmax(outputs / self.distill_temp, dim=1)
-
+                log_p_student = F.log_softmax(outputs / self.distill_temp, dim=1)
+                loss_distill = torch.zeros((), device=self.device)
                 for teacher in bad_teachers:
                     with torch.no_grad():
-                        teacher_outputs = teacher(x)
-                        p_teacher = F.softmax(teacher_outputs / self.distill_temp, dim=1)
-                    loss_distill += criterion_kl(p_student, p_teacher) * (self.distill_temp ** 2)
+                        p_teacher = F.softmax(teacher(x) / self.distill_temp, dim=1)
+                    loss_distill = loss_distill + criterion_kl(log_p_student, p_teacher)
+                loss_distill = loss_distill / float(len(bad_teachers))
 
-                loss_distill = loss_distill / self.num_bad_teachers
-
-                # 融合成联合任务损失 L_unlearn (公式 8)
-                loss_unlearn = loss_hard + self.mu_c * loss_confusion + self.mu_d * loss_distill
+                loss_unlearn = (
+                    loss_hard
+                    + self.mu_c * loss_confusion
+                    + self.mu_d * loss_distill
+                )
                 loss_unlearn.backward()
-                torch.nn.utils.clip_grad_norm_(self.global_model.parameters(), max_norm=10.0)
 
-                # 完美抽取并打包独立干净的遗忘梯度向量 g_f
-                g_f = {}
-                for name, param in self.global_model.named_parameters():
-                    if param.grad is not None:
-                        g_f[name] = param.grad.clone()
-                    else:
-                        g_f[name] = torch.zeros_like(param.data)
+                g_f = {
+                    name: (p.grad.detach().clone() if p.grad is not None else torch.zeros_like(p))
+                    for name, p in self.global_model.named_parameters()
+                }
 
-                # =========================================================
-                # 步骤 B: 独立分流计算记忆/权重漂移任务梯度 g_r (对齐公式 17)
-                # =========================================================
-                optimizer_unlearn.zero_grad()
-
-                loss_drift = 0.0
-                for name, param in self.global_model.named_parameters():
-                    # 严格计算对原始模型的参数漂移惩罚
-                    loss_drift += 0.5 * torch.sum((param - self.original_model.state_dict()[name]) ** 2)
-
-                loss_drift.backward()
-
-                # 完美抽取并打包独立的记忆梯度向量 g_r，并立刻执行公式 22 的二值掩蔽过滤 (g_r' = g_r * m_s)
+                # ----- drift gradient g_r = d(1/2||w-w_ref||^2)/dw -----
                 g_r_primed = {}
-                for name, param in self.global_model.named_parameters():
-                    if param.grad is not None:
-                        # 仅保留安全通配区的记忆更新，直接物理抹杀敏感区的遗忘残留
-                        g_r_primed[name] = param.grad.clone() * gradient_mask[name]
-                    else:
-                        g_r_primed[name] = torch.zeros_like(param.data)
-
-                # =========================================================
-                # 步骤 C: 部署多任务冲突外科手术：梯度协调 (严格对齐公式 20)
-                # =========================================================
-                g_composite = {}
+                loss_drift = torch.zeros((), device=self.device)
                 with torch.no_grad():
-                    for name, param in self.global_model.named_parameters():
-                        gf_vec = g_f[name]
-                        gr_vec = g_r_primed[name]
+                    for name, p in self.global_model.named_parameters():
+                        diff = p.detach() - ref_params[name].detach()
+                        loss_drift += 0.5 * torch.sum(diff * diff)
+                        g_r_primed[name] = diff * gradient_mask[name]
 
-                        # 计算两个高维梯度稠密矩阵的余弦相似度
-                        dot_product = torch.sum(gf_vec * gr_vec)
-                        norm_f = torch.norm(gf_vec)
-                        norm_r = torch.norm(gr_vec)
+                # ----- Eq. (20), full-model projection -----
+                g_composite, dot = self._global_gradient_harmonization(g_f, g_r_primed)
+                if dot < 0:
+                    conflicts += 1
+                g_composite = self._clip_gradient_dict(
+                    g_composite, self.max_update_norm
+                )
 
-                        # 如果余弦夹角小于0，说明发生剧烈冲突，启动正交投影擦除
-                        if dot_product < 0 and norm_r > 1e-8:
-                            # 严格执行公式 (20)：从 g_f 中剔除在 g_r' 方向上的伴生负贡献分量
-                            projection = (dot_product / (norm_r ** 2)) * gr_vec
-                            gf_corrected = gf_vec - projection
-                        else:
-                            gf_corrected = gf_vec
-
-                        # 严格执行公式 (20) 末尾的线性融合：G = g_f' + g_r'
-                        g_composite[name] = gf_corrected + gr_vec
-
-                # =========================================================
-                # 步骤 D: 参数空间物理回填，手动执行常规梯度优化步骤
-                # =========================================================
-                optimizer_unlearn.zero_grad()
+                # Literal Algorithm-1 update: w <- w - mu_un * G.
+                # No momentum/weight-decay term is injected outside the mask.
                 with torch.no_grad():
-                    for name, param in self.global_model.named_parameters():
-                        if name in g_composite:
-                            # 将外科手术式修正后的合成梯度 G 手动挂载回实体的 .grad 容器中
-                            param.grad = g_composite[name].clone()
+                    for name, p in self.global_model.named_parameters():
+                        p.add_(g_composite[name], alpha=-self.unlearn_lr)
 
-                # 在 step() 之前，强制对合成梯度 G 实施范数裁剪
-                torch.nn.utils.clip_grad_norm_(self.global_model.parameters(), max_norm=10)
+                total_unlearn += float(loss_unlearn.item())
+                total_drift += float(loss_drift.item())
+                n_batches += 1
 
-                optimizer_unlearn.step()
+            print(
+                f"  unlearn epoch {epoch + 1}/{self.unlearn_epochs}: "
+                f"L_un={total_unlearn / max(n_batches, 1):.6f}, "
+                f"L_drift={total_drift / max(n_batches, 1):.6f}, "
+                f"conflict_batches={conflicts}/{n_batches}"
+            )
 
-                loss_unlearn_all += loss_unlearn.item()
-                loss_drift_all += loss_drift.item()
+        self.global_model.eval()
 
-            mean_unlearn = loss_unlearn_all / len(self.proxy_noise_loader)
-            mean_drift = loss_drift_all / len(self.proxy_noise_loader)
-        #     print(
-        #         f"    Epoch [{epoch + 1}/{self.unlearn_epochs}] - L_unlearn: {mean_unlearn:.4f} | L_drift: {mean_drift:.4f}")
-
-        # print("  [Unlearn Engine] 多目标联合遗忘训练完成。敏感贡献已被精准剥离。")
-
+    # ------------------------------------------------------------------
+    # Stage 4：Zero-shot Adaptive Repair
+    # ------------------------------------------------------------------
     def adaptive_model_repair(self):
         """
-        阶段④算法全量落地：严格执行论文 4.5 节设计的零样本修复策略。
-        依据各正常客户端的测试准确率退化程度，自适应触发端侧本地保留噪声构建并执行公式(23)、(24)。
+        Stage 4：可选的零样本自适应修复。
+
+        whole-client 删除场景：
+            - target client 的全部数据均属于 D_f，因此绝不能参与 repair；
+            - 只检查 remaining clients 的性能下降；
+            - 若相对准确率下降超过 delta，则该客户端本地生成 retention proxy N_r^i；
+            - 服务器按客户端 retained-data 规模加权组合 N_r，并使用 Algorithm 1
+              中的 MSE repair objective 对遗忘后模型进行少量修复。
         """
-        # print("  [Repair Stage] Assessing accuracy drop on remaining clients...")
-
-        # 1. 过滤识别出联邦网络中未参与遗忘的正常存留客户端集合 C_r
-        forget_client_ids = [c.id for c in self.unlearning_clients]
-        remaining_clients = [c for c in self.clients if c.id not in forget_client_ids]
-
-        if len(remaining_clients) == 0:
-            # print("  [Repair Skip] 服务器未检测到任何剩余客户端资产，无须执行性能修复。")
+        forget_ids = {c.id for c in self.unlearning_clients}
+        # Correct for whole-client deletion: target client owns no retained data.
+        remaining_clients = [c for c in self.clients if c.id not in forget_ids]
+        if not remaining_clients:
+            print("  no remaining clients; repair skipped")
             return
 
-        # 2. 依次评估各正常端在执行遗忘微调之后的性能降幅
-        triggered_client_noises = []
-        triggered_client_labels = []
-
+        repair_parts = []
         for client in remaining_clients:
-            # 评估微调前该端基础性能 (读取预训练模型历史快照资产，对齐底层返回的 7 个指标)
-            # temp_model = copy.deepcopy(self.global_model)
-            # temp_model.load_state_dict(torch.load(self.pretrain_model_path, map_location=self.device))
-            #  修复代码：显式指定 weights_only=False，并直接作为完整模型对象载入
-            temp_model = torch.load(self.pretrain_model_path, map_location=self.device, weights_only=False)
-            client.set_parameters(temp_model)
-            ct_pre, ns_pre, _, _, _, _, _ = client.test_metrics()
-            pre_acc = (ct_pre * 1.0) / ns_pre if ns_pre > 0 else 0.0  # 计算得到准确率
+            pre_acc = self._client_accuracy(client, self.original_model)
+            post_acc = self._client_accuracy(client, self.global_model)
+            relative_drop = (pre_acc - post_acc) / max(pre_acc, 1e-12)
 
-            # 评估遗忘微调之后的该端端侧精度
-            client.set_parameters(self.global_model)
-            ct_post, ns_post, _, _, _, _, _ = client.test_metrics()
-            post_acc = (ct_post * 1.0) / ns_post if ns_post > 0 else 0.0
+            print(
+                f"  client {client.id}: pre={pre_acc:.4f}, post={post_acc:.4f}, "
+                f"relative_drop={relative_drop:.4f}"
+            )
 
-            acc_drop = pre_acc - post_acc
-            # print(
-            #     f"    - Client {client.id}: Pre-Acc = {pre_acc * 100:.2f}%, Post-Acc = {post_acc * 100:.2f}%, Drop = {acc_drop * 100:.2f}%")
+            # Jellyfish Eq. (23): relative percentage drop, not absolute points.
+            if relative_drop > self.delta_threshold:
+                r_x, r_y = client.generate_retention_noise(
+                    global_model=self.global_model,
+                    steps=self.repair_noise_steps,
+                    lr=self.repair_noise_lr,
+                )
+                n_local = int(getattr(client, "train_samples", r_y.numel()))
+                repair_parts.append((r_x.detach().cpu(), r_y.detach().cpu(), n_local))
 
-            # 严格对齐论文4.5节触发准则：如果测试准确率下降超过预定义阈值 \delta
-            if acc_drop > self.delta_threshold:
-                # print(
-                #     f"      >>> [Triggered] 精度损伤达 {acc_drop * 100:.2f}% (>{self.delta_threshold * 100}%)，下发修复噪声命令...")
-                # 客户端在本地按保留类别分布定制生成保留代理噪声 N_r^i
-                r_noise, r_label = client.generate_retention_noise(global_model=self.global_model)
-                triggered_client_noises.append(r_noise)
-                triggered_client_labels.append(r_label)
-            else:
-                print("      >>> [Pass] 性能保持良好，免于提交修复数据。")
-
-        # 3. 严格执行公式 (23)：如果存在触发端，对其上报的保留噪声数据集取并集进行聚合
-        if len(triggered_client_noises) == 0:
-            # print("  [Repair Skip] 正常客户端未发生严重性能受损，模型修复流自适应熔断。")
+        if not repair_parts:
+            print("  no client crossed delta; repair skipped")
             return
 
-        # print(
-        #     f"  [Repair Engine] Aggregating {len(triggered_client_noises)} clients' retention datasets via Eq.(23)...")
-        # 合并构建统一的全局保留噪声数据集 \mathcal{N}_r
-        aggregated_r_noises = torch.cat(triggered_client_noises, dim=0)
-        aggregated_r_labels = torch.cat(triggered_client_labels, dim=0)
+        # Weight each client's repair contribution proportional to |D_r^i|,
+        # independently of how many proxy samples NoiseGenerator returned.
+        xs, ys, ws = [], [], []
+        for x, y, n_local in repair_parts:
+            n_proxy = max(int(y.numel()), 1)
+            per_proxy_weight = float(n_local) / float(n_proxy)
+            xs.append(x)
+            ys.append(y)
+            ws.append(torch.full((n_proxy,), per_proxy_weight, dtype=torch.float32))
 
-        self.repair_noise_loader = DataLoader(
-            list(zip(aggregated_r_noises, aggregated_r_labels)),
+        x_all = torch.cat(xs, dim=0)
+        y_all = torch.cat(ys, dim=0)
+        w_all = torch.cat(ws, dim=0)
+        loader = DataLoader(
+            TensorDataset(x_all, y_all, w_all),
             batch_size=self.batch_size,
             shuffle=True,
-            drop_last=False
+            drop_last=False,
         )
-        # print(
-        #     f"  [Repair Engine] Global Retention dataset \\mathcal{{N}}_r created (Total size: {aggregated_r_noises.shape[0]})")
 
-        # 4. 严格执行公式 (24)：使用交叉熵损失函数对遗忘后的模型进行知识回填微调
-        # optimizer_repair = torch.optim.Adam(self.global_model.parameters(), lr=self.repair_lr)
-        #  改用带重度权重衰减的随机梯度下降，锁死参数边界
-        optimizer_repair = torch.optim.SGD(
-            self.global_model.parameters(),
-            lr=0.001,  # 修复学习率不宜过大，降到 0.001
-            momentum=0.9,
-            weight_decay=0.001  # 强行用 L2 正则化把大参数拽回来
-        )
-        criterion_repair = nn.CrossEntropyLoss()
-
-        # print(f"  [Repair Tuning] Fine-tuning the global model for {self.repair_epochs} epochs...")
+        optimizer = torch.optim.SGD(self.global_model.parameters(), lr=self.repair_lr)
         self.global_model.train()
+        self._freeze_bn_stats(self.global_model)
 
-        for rep_epoch in range(self.repair_epochs):
-            loss_rep_total = 0.0
-            for r_x, r_y in self.repair_noise_loader:
-                r_x, r_y = r_x.to(self.device), r_y.to(self.device)
+        for epoch in range(self.repair_epochs):
+            total_loss, n_batches = 0.0, 0
+            for x, y, w in loader:
+                x = x.to(self.device)
+                y = y.to(self.device)
+                w = w.to(self.device)
 
-                optimizer_repair.zero_grad()
-                rep_outputs = self.global_model(r_x)
+                optimizer.zero_grad(set_to_none=True)
+                logits = self.global_model(x)
 
-                # 计算公式 (24)：在全局保留代理噪声数据集上的交叉熵损失
-                loss_repair = criterion_repair(rep_outputs, r_y)
-                loss_repair.backward()
-                torch.nn.utils.clip_grad_norm_(self.global_model.parameters(), max_norm=10)
-                optimizer_repair.step()
+                # Algorithm 1 writes MSE for L_repair.  Eq. (24) in the text
+                # is the objective for generating N_r, not the server repair loss.
+                target = F.one_hot(y, num_classes=self.num_classes).float()
+                pred = F.softmax(logits, dim=1)
+                per_sample = torch.mean((pred - target) ** 2, dim=1)
+                loss = torch.sum(per_sample * w) / torch.sum(w).clamp_min(1e-12)
 
-                loss_rep_total += loss_repair.item()
+                loss.backward()
+                if self.max_update_norm is not None and self.max_update_norm > 0:
+                    torch.nn.utils.clip_grad_norm_(
+                        self.global_model.parameters(), self.max_update_norm
+                    )
+                optimizer.step()
 
-        #     print(
-        #         f"    Repair Epoch [{rep_epoch + 1}/{self.repair_epochs}] - L_repair Loss: {loss_rep_total / len(self.repair_noise_loader):.6f}")
+                total_loss += float(loss.item())
+                n_batches += 1
 
-        # print("  [Repair Engine] 零样本模型修复微调结束。丢失的正常域泛化能力成功回填。")
+            print(
+                f"  repair epoch {epoch + 1}/{self.repair_epochs}: "
+                f"loss={total_loss / max(n_batches, 1):.6f}"
+            )
+
+        self.global_model.eval()
