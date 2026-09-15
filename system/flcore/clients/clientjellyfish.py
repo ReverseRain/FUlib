@@ -1,55 +1,75 @@
+import os
+import torch
+import torch.nn as nn
 import copy
+from torch.utils.data import DataLoader
+from flcore.clients.clientbase import Client
 import time
 import numpy as np
-import torch
-from torch.utils.data import DataLoader, TensorDataset
 
-from flcore.clients.clientbase import Client
 from utils.noise_utils import NoiseGenerator
 
 
 class clientJellyfish(Client):
-    """
-    Jellyfish 联邦遗忘客户端。
+    def __init__(self, args, id, train_samples, test_samples, **kwargs):
+        super().__init__(args, id, train_samples, test_samples, **kwargs)
 
-    whole-client unlearning baseline：
-    1) 将目标客户端的全部本地训练数据视为 D_f；
-    2) 先统计整个目标客户端的类别分布；
-    3) 对每个类别分别生成 class-conditioned proxy noise；
-    4) 将各类别 proxy 合并为该客户端的 N_f。
-
-    这里不显式使用原图内容、trigger、poison-aware loss 或 gradient matching，
-    以保持 Jellyfish 代理数据生成方式作为基线。
-    """
-
-    def __init__(self, args, id, train_samples, test_samples, unlearning, **kwargs):
-        super().__init__(args, id, train_samples, test_samples, unlearning, **kwargs)
-
+        # 这里定义生成噪声的步数与学习率
         self.noise_steps = getattr(args, "noise_steps", 200)
         self.noise_lr = getattr(args, "noise_lr", 0.1)
 
+        # Stage 4 Repair 的 N_r 生成超参数。
+        # 论文定义了 E_re / mu_re 以及 error-minimization noise，
+        # 但可见实验段没有给出 repair-noise 的固定数值，因此保持可配置。
+        self.repair_noise_steps = getattr(
+            args,
+            "repair_noise_steps",
+            100
+        )
+        self.repair_noise_lr = getattr(
+            args,
+            "repair_noise_lr",
+            0.1
+        )
+
+        # 这里定义proxy data的本体和label
         self.proxy_noises = None
         self.proxy_labels = None
         self.retain_noises = None
         self.retain_labels = None
 
-    def train(self):
-        """标准联邦本地训练阶段。"""
+    @staticmethod
+    def _extract_tensor_input(x):
+        if isinstance(x, (list, tuple)):
+            return x[0]
+        return x
+
+    def _get_img_size(self):
+        """从当前客户端训练数据推断图像输入尺寸。"""
         trainloader = self.load_train_data()
+        for x, _ in trainloader:
+            x_tensor = self._extract_tensor_input(x)
+            return tuple(x_tensor.shape[1:])
+
+        return (3, 32, 32)
+
+
+    def train(self):
+        """
+        客户端本地标准训练逻辑 (FedAvg 本地更新)
+        """
+        trainloader = self.train_loader
         self.model.train()
 
         start_time = time.time()
+
         max_local_epochs = self.local_epochs
-
         if self.train_slow:
-            if max_local_epochs > 1:
-                max_local_epochs = np.random.randint(1, max(2, max_local_epochs // 2 + 1))
-            else:
-                max_local_epochs = 1
+            max_local_epochs = np.random.randint(1, max_local_epochs // 2)
 
-        for _ in range(max_local_epochs):
-            for x, y in trainloader:
-                if isinstance(x, list):
+        for epoch in range(max_local_epochs):
+            for i, (x, y) in enumerate(trainloader):
+                if type(x) == type([]):
                     x[0] = x[0].to(self.device)
                 else:
                     x = x.to(self.device)
@@ -65,217 +85,214 @@ class clientJellyfish(Client):
                 loss.backward()
                 self.optimizer.step()
 
-        if self.learning_rate_decay:
-            if hasattr(self, "poison_start_time"):
-                if self.train_time_cost["num_rounds"] < self.poison_start_time:
-                    self.learning_rate_scheduler.step()
-            else:
-                self.learning_rate_scheduler.step()
+        if not self.unlearning:
+            self.learning_rate_scheduler.step()
 
-        self.train_time_cost["num_rounds"] += 1
-        self.train_time_cost["total_cost"] += time.time() - start_time
+        self.train_time_cost['num_rounds'] += 1
+        self.train_time_cost['total_cost'] += time.time() - start_time
 
-    @staticmethod
-    def _extract_tensor_input(x):
-        if isinstance(x, (list, tuple)):
-            return x[0]
-        return x
-
-    def _scan_train_loader(self, trainloader=None):
+    def generate_proxy_noise(self, global_model):
         """
-        扫描完整本地训练集，返回：
-            class_counts: {class_id: num_samples}
-            img_size: (C, H, W)
-
-        这里只读取标签和输入尺寸，不把真实图像内容用于 proxy optimization。
+            Jellyfish Step1: Error-Minimization Noise
+            输入:
+            client的本地数据
+            输出:
+            proxy noise:N_f以及标签:Y_f
+            方法：
+            使用Noise_generator中的 generate_for_client 方法为一个client中的dataloader生成代理噪声数据集
         """
-        if trainloader is None:
-            trainloader = self.load_train_data()
-
-        class_counts = {}
-        img_size = None
-        total_samples = 0
-
-        for x, y in trainloader:
-            x_tensor = self._extract_tensor_input(x)
-
-            if img_size is None:
-                if x_tensor.ndim < 2:
-                    raise RuntimeError(
-                        f"Client {self.id}: invalid input shape {tuple(x_tensor.shape)}."
-                    )
-                img_size = tuple(x_tensor.shape[1:])
-
-            y_cpu = y.detach().cpu().view(-1)
-            for label in y_cpu:
-                cls = int(label.item())
-                class_counts[cls] = class_counts.get(cls, 0) + 1
-                total_samples += 1
-
-        if total_samples == 0:
-            raise RuntimeError(f"Client {self.id}: training dataset is empty.")
-
-        if img_size is None:
-            raise RuntimeError(f"Client {self.id}: failed to infer image size.")
-
-        return class_counts, img_size
-
-    def generate_noise(self, global_model, steps=None, lr=None):
-        """
-        Jellyfish 阶段①：为整个待遗忘客户端生成代理遗忘数据集 N_f。
-
-        对完整 D_f 先统计各类别样本数 n_c，再对每个类别 c 独立生成：
-            N_{f,c} = argmin_N CE(M(N), c)
-            |N_{f,c}| = n_c
-
-        最终：
-            N_f = union_c N_{f,c}
-
-        返回 list[tensor] 以兼容现有 server 的 aggregate_client_noises()。
-        """
-        if steps is None:
-            steps = self.noise_steps
-        if lr is None:
-            lr = self.noise_lr
-
-        trainloader = self.load_train_data()
-        class_counts, img_size = self._scan_train_loader(trainloader)
-
-        print(
-            f"[Client {self.id}] Forget-set class distribution: "
-            f"{dict(sorted(class_counts.items()))}"
-        )
-
-        frozen_model = copy.deepcopy(global_model)
-        noise_gen = NoiseGenerator(
-            model=frozen_model,
-            device=self.device,
+        print("dataset图像的size是 ", self._get_img_size())
+        noise_generator = NoiseGenerator(
+            model = global_model,
+            device = self.device,
             num_classes=self.num_classes,
-            img_size=img_size,
+            img_size = self._get_img_size(),
+        )
+        noises, labels = noise_generator.generate_for_client(
+            client_train_loader=self.train_loader,
+            steps = self.noise_steps,
+            lr = self.noise_lr,
+        )
+        self.proxy_noises = noises
+        self.proxy_labels = labels
+        return noises, labels
+
+
+    def evaluate_local_accuracy(self, model=None):
+        """
+        Stage 4 Eq.(23):
+        评估当前全局模型在本客户端 local remaining test data 上的 accuracy。
+
+        这里只返回 0~1 accuracy，不修改模型参数。
+        """
+        if model is None:
+            model = self.model
+
+        model.eval()
+
+        correct = 0
+        total = 0
+
+        with torch.no_grad():
+            for x, y in self.test_loader:
+                if isinstance(x, (list, tuple)):
+                    x = [
+                        item.to(self.device)
+                        for item in x
+                    ]
+                else:
+                    x = x.to(self.device)
+
+                y = y.to(self.device)
+
+                logits = model(x)
+                pred = torch.argmax(
+                    logits,
+                    dim=1
+                )
+
+                correct += int(
+                    (pred == y).sum().item()
+                )
+                total += int(
+                    y.numel()
+                )
+
+        return (
+            correct / max(total, 1)
         )
 
-        noises, labels = noise_gen.generate_with_class_distribution(
-            class_counts=class_counts,
-            steps=steps,
-            lr=lr,
-        )
+    def generate_repair_noise(self, global_model):
+        """
+        Jellyfish Stage 4 / Section 4.5 / Eq.(24)
 
-        self.proxy_noises = [noises]
-        self.proxy_labels = [labels]
+        使用客户端 remaining training data D_r^i 的标签分布，
+        通过 error-minimization noise 生成 repair proxy N_r^i。
 
+        非常重要：
+        NoiseGenerator 在初始化时会 freeze 它持有的 model。
+        因此这里必须对 Stage3 后 global_model 做 deepcopy，
+        不能直接把 server 的可训练 global_model 交给 NoiseGenerator，
+        否则会把真正待 Repair 的模型 requires_grad 关闭。
+
+        Returns:
+            noises:
+                list[Tensor]，每个 batch 对应 N_r^i 的一部分
+            labels:
+                list[Tensor]，对应 y_r^i
+            remaining_size:
+                本次实际生成的 proxy 样本总数；
+                用于 server 验证 |D_r^i| 权重。
+        """
         print(
-            f"[Client {self.id}] Proxy dataset generated: "
-            f"{labels.numel()} samples, {len(class_counts)} classes."
+            f"[Stage4] Client {self.id}: "
+            f"generating remaining proxy N_r, "
+            f"img_size={self._get_img_size()}"
         )
 
-        return self.proxy_noises, self.proxy_labels
+        repair_reference_model = copy.deepcopy(
+            global_model
+        ).to(
+            self.device
+        )
 
-    def generate_noise_by_class(self, global_model, class_counts, steps=None, lr=None):
-        """按外部给定的类别分布生成 proxy，主要用于辅助实验/调试。"""
-        if steps is None:
-            steps = self.noise_steps
-        if lr is None:
-            lr = self.noise_lr
+        repair_reference_model.eval()
 
-        class_counts = {
-            int(k): int(v)
-            for k, v in class_counts.items()
-            if int(v) > 0
-        }
-        if not class_counts:
-            raise ValueError("class_counts contains no positive sample counts.")
-
-        frozen_model = copy.deepcopy(global_model)
-        noise_gen = NoiseGenerator(
-            model=frozen_model,
+        noise_generator = NoiseGenerator(
+            model=repair_reference_model,
             device=self.device,
             num_classes=self.num_classes,
             img_size=self._get_img_size(),
         )
 
-        noises, labels = noise_gen.generate_with_class_distribution(
-            class_counts=class_counts,
-            steps=steps,
-            lr=lr,
-        )
+        # 使用新的完整本地训练 DataLoader 读取 remaining data，
+        # 避免复用某些工程中可能带 drop_last 的训练 loader。
+        repair_train_loader = self.load_train_data()
 
-        self.proxy_noises = [noises]
-        self.proxy_labels = [labels]
-
-        return self.proxy_noises, self.proxy_labels
-
-    def generate_retention_noise(self, global_model, steps=100, lr=0.1):
-        """
-        Jellyfish 阶段④：为 remaining client 生成保留代理数据 N_r^i。
-
-        whole-client unlearning 下，目标遗忘客户端不应调用本函数。
-        """
-        trainloader = self.load_train_data()
-        class_counts, img_size = self._scan_train_loader(trainloader)
-
-        print(
-            f"[Client {self.id}] Retention-set class distribution: "
-            f"{dict(sorted(class_counts.items()))}"
-        )
-
-        frozen_model = copy.deepcopy(global_model)
-        noise_gen = NoiseGenerator(
-            model=frozen_model,
-            device=self.device,
-            num_classes=self.num_classes,
-            img_size=img_size,
-        )
-
-        noises, labels = noise_gen.generate_with_class_distribution(
-            class_counts=class_counts,
-            steps=steps,
-            lr=lr,
+        noises, labels = (
+            noise_generator.generate_for_client(
+                client_train_loader=repair_train_loader,
+                steps=self.repair_noise_steps,
+                lr=self.repair_noise_lr,
+            )
         )
 
         self.retain_noises = noises
         self.retain_labels = labels
 
-        return noises, labels
+        proxy_count = sum(
+            int(batch_label.numel())
+            for batch_label in labels
+        )
 
-    def get_proxy_noise_loader(self, batch_size=None):
-        """把当前客户端已生成的 proxy noise 打包为 DataLoader。"""
-        if self.proxy_noises is None or self.proxy_labels is None:
-            raise ValueError(
-                "Proxy noise not generated yet. Call generate_noise() first."
+        # 论文聚合权重使用 |D_r^i|。
+        # Client 基类通常保存 train_samples；若当前工程没有该字段，
+        # 才退化为本次实际生成的 proxy 数量。
+        remaining_size = int(
+            getattr(
+                self,
+                "train_samples",
+                proxy_count
             )
-
-        if batch_size is None:
-            batch_size = self.batch_size
-
-        noises = torch.cat(
-            [n.detach().cpu() for n in self.proxy_noises],
-            dim=0,
-        )
-        labels = torch.cat(
-            [l.detach().cpu().long() for l in self.proxy_labels],
-            dim=0,
         )
 
-        dataset = TensorDataset(noises, labels)
-
-        return DataLoader(
-            dataset,
-            batch_size=batch_size,
-            shuffle=True,
-            drop_last=False,
+        print(
+            f"[Stage4] Client {self.id}: "
+            f"|D_r|={remaining_size}, "
+            f"N_r samples={proxy_count}"
         )
 
-    def get_class_distribution(self):
-        """统计当前客户端完整训练集类别分布。"""
-        trainloader = self.load_train_data()
-        class_counts, _ = self._scan_train_loader(trainloader)
-        return class_counts
+        return (
+            noises,
+            labels,
+            remaining_size
+        )
 
-    def _get_img_size(self):
-        """从当前客户端训练数据推断图像输入尺寸。"""
-        trainloader = self.load_train_data()
-        for x, _ in trainloader:
-            x_tensor = self._extract_tensor_input(x)
-            return tuple(x_tensor.shape[1:])
 
-        return (3, 32, 32)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
