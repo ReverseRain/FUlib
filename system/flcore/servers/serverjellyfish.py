@@ -182,15 +182,15 @@ class Jellyfish(Server):
         (client_noises, client_labels)= self.generate_proxy_noise()
         self.aggregate_proxy_noise(client_noises, client_labels)
         self.save_proxy_noise()
-        # print(
-        #     "Jellyfish Stage 1 Finished."
-        # )
+        print(
+            "Jellyfish Stage 1 Finished."
+        )
 
         # 第二步，知识解耦
         self.knowledge_disentanglement()
-        # print(
-        #     "Jellyfish Stage2 Finished"
-        # )
+        print(
+            "Jellyfish Stage2 Finished"
+        )
         self.send_models()
         self.global_model.eval()
         self.evaluate()
@@ -199,7 +199,7 @@ class Jellyfish(Server):
         # Stage 3: Loss Function Construction + Gradient Optimization
         # ============================================================
         self.loss_function_unlearning()
-        # print("\nJellyfish Stage 3 Finished.")
+        print("\nJellyfish Stage 3 Finished.")
         # 同样将 Stage 3 后的 global model 广播给 clients 再评估。
         self.send_models()
         self.global_model.eval()
@@ -269,16 +269,16 @@ class Jellyfish(Server):
                 "original_model is None."
             )
 
-        # print("\n")
-        # print("=" * 70)
-        # print(" Jellyfish Stage 1.1 Generate Proxy Noise ")
-        # print("=" * 70)
+        print("\n")
+        print("=" * 70)
+        print(" Jellyfish Stage 1.1 Generate Proxy Noise ")
+        print("=" * 70)
         client_noises_list = []
         client_labels_list = []
         for client in self.unlearning_clients:
-            # print(
-            #     f"\nClient {client.id} generating noise..."
-            # )
+            print(
+                f"\nClient {client.id} generating noise..."
+            )
             # 生成噪声和label
             noises, labels = (
                 client.generate_proxy_noise(
@@ -305,18 +305,18 @@ class Jellyfish(Server):
             self.aggregated_labels
         ============================================================
         """
-        # print("\n")
-        # print("=" * 70)
-        # print(" Jellyfish Stage 1.2 Aggregate Proxy Noise ")
-        # print("=" * 70)
+        print("\n")
+        print("=" * 70)
+        print(" Jellyfish Stage 1.2 Aggregate Proxy Noise ")
+        print("=" * 70)
 
         (noises, labels) = aggregate_client_noises(client_noises_list, client_labels_list)
         self.aggregated_noises = noises
         self.aggregated_labels = labels
-        # print(
-        #     "Global proxy noise shape:",
-        #     noises.shape
-        # )
+        print(
+            "Global proxy noise shape:",
+            noises.shape
+        )
         # 创建后续unlearning使用的数据加载器
         self.proxy_noise_loader = (
             create_noise_dataloader(
@@ -442,18 +442,18 @@ class Jellyfish(Server):
                 loss.backward()
                 optimizer.step()
                 total_loss += loss.item()
-            # print(
-            #     f"Epoch {epoch + 1}/{epochs}, "
-            #     f"L_dis={total_loss / len(self.proxy_noise_loader)}"
-            # )
+            print(
+                f"Epoch {epoch + 1}/{epochs}, "
+                f"L_dis={total_loss / len(self.proxy_noise_loader)}"
+            )
         hook_handle.remove()
         torch.save(
             self.global_model.state_dict(),
             "jellyfish_disentangled_model.pt"
         )
-        # print(
-        #     "Knowledge disentanglement finished"
-        # )
+        print(
+            "Knowledge disentanglement finished"
+        )
 
     #下面是第三步关于复合损失函数构建的几个方法
     @staticmethod
@@ -1582,12 +1582,12 @@ class Jellyfish(Server):
         triggered_clients = []
         drop_info = {}
 
-        # print("\n" + "=" * 70)
-        # print(" Jellyfish Stage 4.1: Repair Trigger Check (Eq.23) ")
-        # print("=" * 70)
-        # print(
-        #     f"repair delta threshold = {delta_threshold:.2%}"
-        # )
+        print("\n" + "=" * 70)
+        print(" Jellyfish Stage 4.1: Repair Trigger Check (Eq.23) ")
+        print("=" * 70)
+        print(
+            f"repair delta threshold = {delta_threshold:.2%}"
+        )
 
         for client in candidates:
             before = float(
@@ -1627,13 +1627,13 @@ class Jellyfish(Server):
                 "triggered": should_repair,
             }
 
-            # print(
-            #     f"Client {client.id}: "
-            #     f"before={before:.4%}, "
-            #     f"after={after:.4%}, "
-            #     f"DeltaAcc={drop_ratio:.4%}, "
-            #     f"repair={'YES' if should_repair else 'NO'}"
-            # )
+            print(
+                f"Client {client.id}: "
+                f"before={before:.4%}, "
+                f"after={after:.4%}, "
+                f"DeltaAcc={drop_ratio:.4%}, "
+                f"repair={'YES' if should_repair else 'NO'}"
+            )
 
             if should_repair:
                 triggered_clients.append(client)
@@ -1657,9 +1657,9 @@ class Jellyfish(Server):
         if len(repair_clients) == 0:
             return [], [], []
 
-        # print("\n" + "=" * 70)
-        # print(" Jellyfish Stage 4.2: Generate Remaining Proxy N_r ")
-        # print("=" * 70)
+        print("\n" + "=" * 70)
+        print(" Jellyfish Stage 4.2: Generate Remaining Proxy N_r ")
+        print("=" * 70)
 
         client_noises_list = []
         client_labels_list = []
@@ -1670,9 +1670,9 @@ class Jellyfish(Server):
         self.send_models()
 
         for client in repair_clients:
-            # print(
-            #     f"\nClient {client.id} generating repair proxy N_r ..."
-            # )
+            print(
+                f"\nClient {client.id} generating repair proxy N_r ..."
+            )
 
             noises, labels, remaining_size = (
                 client.generate_repair_noise(
@@ -1735,10 +1735,10 @@ class Jellyfish(Server):
             )
         )
 
-        # print(
-        #     "Global repair proxy N_r shape:",
-        #     tuple(noises.shape)
-        # )
+        print(
+            "Global repair proxy N_r shape:",
+            tuple(noises.shape)
+        )
 
         return noises, labels, aggregation_info
 
@@ -1768,10 +1768,10 @@ class Jellyfish(Server):
             save_path
         )
 
-        # print(
-        #     "Repair proxy noise saved:",
-        #     save_path
-        # )
+        print(
+            "Repair proxy noise saved:",
+            save_path
+        )
 
     def repair_global_model(self):
         """
@@ -1996,11 +1996,11 @@ class Jellyfish(Server):
                 stats
             )
 
-            # print(
-            #     f"[Stage 4] Epoch {epoch + 1}/{repair_epochs}, "
-            #     f"L_repair={mean_loss:.6f}, "
-            #     f"mean triggered-client acc={mean_local_acc:.4%}"
-            # )
+            print(
+                f"[Stage 4] Epoch {epoch + 1}/{repair_epochs}, "
+                f"L_repair={mean_loss:.6f}, "
+                f"mean triggered-client acc={mean_local_acc:.4%}"
+            )
 
         self.global_model.eval()
 
@@ -2037,9 +2037,9 @@ class Jellyfish(Server):
                     False
                 )
         ):
-            # print(
-            #     "\n[Stage4] Repair disabled by args.disable_repair."
-            # )
+            print(
+                "\n[Stage4] Repair disabled by args.disable_repair."
+            )
             self.stage4_history = [
                 {
                     "skipped": True,
@@ -2058,10 +2058,10 @@ class Jellyfish(Server):
         ]
 
         if len(repair_clients) == 0:
-            # print(
-            #     "\n[Stage4] No client exceeds repair threshold. "
-            #     "Repair is skipped."
-            # )
+            print(
+                "\n[Stage4] No client exceeds repair threshold. "
+                "Repair is skipped."
+            )
             self.stage4_history = [
                 {
                     "skipped": True,
@@ -2103,8 +2103,8 @@ class Jellyfish(Server):
 
         self.send_models()
 
-        # print("\n" + "=" * 70)
-        # print(" Jellyfish Stage 4 Repair Finished ")
-        # print("=" * 70)
+        print("\n" + "=" * 70)
+        print(" Jellyfish Stage 4 Repair Finished ")
+        print("=" * 70)
 
 
