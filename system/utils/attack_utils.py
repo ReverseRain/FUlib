@@ -64,14 +64,14 @@ def attack(target_model, attack_model, unlearning_clients, N_class,device):
         YY = np.hstack((unlearn_y, test_y))
         
         pred_YY = attack_model.predict(XX)
-        # acc = accuracy_score( YY, pred_YY)
-        pre = precision_score(YY, pred_YY, pos_label=1)
+        acc = accuracy_score( YY, pred_YY)
+        # pre = precision_score(YY, pred_YY, pos_label=1)
         rec = recall_score(YY, pred_YY, pos_label=1)
     # print("MIA Attacker accuracy = {:.4f}".format(acc))
     # print("MIA Attacker precision = {:.4f}".format(pre))
     # print("MIA Attacker recall = {:.4f}".format(rec))
     
-    return (pre, rec)
+    return (acc, rec)
 
 def train_attack_model(shadow_old_GM, shadow_clients, N_class,device):
     shadow_model = shadow_old_GM
