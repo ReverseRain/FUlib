@@ -20,8 +20,11 @@ dataset/*/
 /system/job_out_*
 /system/*.sh
 /system/loss_img
+<<<<<<< HEAD
 /system/combine.py
 /system/*.npy
+=======
+>>>>>>> 4580f5db3fd9c5759e0c73dba217c6c15196acc9
 
 /dataset/submit.sh
 
